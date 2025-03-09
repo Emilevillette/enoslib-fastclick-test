@@ -1,0 +1,4 @@
+user=root
+nfs=0
+0:pci=0000:01:00.1
+0:ifname=eno2

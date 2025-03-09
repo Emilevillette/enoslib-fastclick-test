@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pdf
+tmp*
+*.tar.gz
+.vscode/
+*.log
+test2*/
+*.donotcommit
+npf-splits/
+envs/
+cluster/
+.access_test
+results/local
+results/testing

@@ -1,0 +1,6 @@
+parent=fastclick
+name=FastClick
+url=https://github.com/tbarbette/fastclick.git
+configure=./configure --enable-multiconfigure --enable-flow --enable-multithread --disable-linuxmodule --enable-intel-cpu --enable-user-multithread --verbose CFLAGS="-DHAVE_DPDK_INTERRUPT -g -O3 " CPLUS_INCLUDE_PATH="/etinfo/users2/delzotti/dpdk/install_galadriel/include/" CXXFLAGS="-DHAVE_DPDK_INTERRUPT -g -std=gnu++17 -O3" --disable-dynamic-linking --enable-poll --enable-bound-port-transfer --enable-dpdk --enable-dpdk-interrupt --enable-batch --with-netmap=no --enable-zerocopy --disable-dpdk-pool --disable-dpdk-packet --enable-researchthread --disable-linuxmodule --enable-intel-cpu --enable-user-multithread --verbose CFLAGS="-DHAVE_DPDK_INTERRUPT -g -O3 " CXXFLAGS="-DHAVE_DPDK_INTERRUPT -g -std=gnu++17 -O3" --disable-dynamic-linking --enable-poll --enable-bound-port-transfer --enable-dpdk --enable-dpdk-interrupt --enable-batch --with-netmap=no --enable-zerocopy --disable-dpdk-pool --disable-dpdk-packet --enable-research
+configure+=--disable-task-stats  --enable-research --enable-cpu-load --enable-local --enable-flow --enable-bound-port-transfer --disable-dynamic-linking
+make=make

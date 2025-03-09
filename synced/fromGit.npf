@@ -1,0 +1,427 @@
+%variables
+Method={IPFilterDenyPMP}
+kvs:Method=KVS
+kvs:GEN_FNT=-> KVSKeyGen(OFFSET 16)
+kvs:GEN_LENGTH=128
+kvs:NUMBEROFFSET=30
+//Can be WorkPackage ; IPFilterAllow ; IPFilterDeny
+TAG="test_throughput"
+//Tag to identify the experience
+
+nat:Method=NAT
+
+CPU={16}
+WL=1000
+FREQ={3000}
+g5k:GEN_BURST=8
+g5k:GEN_RX_THREADS=8
+g5k:GEN_FLOWSIZE=32
+g5k:THROUGHPUT_SCRIPT_PATH=/root/energy-aware-packet-scheduling/gen_throughput_table.py
+g5k:FASTCLICK_SCRIPT_BUILDER=/root/energy-aware-packet-scheduling/build_pktgen_file.py
+g5k:SLOTH_PATH=/root/sloth/
+g5k:NPF_TEST_PATH_TEST=/root/power/
+g5k:NUMA_NODE=0
+g5k:SLOTH_CSV=/root/energy-aware-packet-scheduling/optimums.csv
+g5k:trace=/root/caida18-4x-ipv4-sanitized.pcap
+g5k:GEN_HTTP_SERVER=0
+g5k:MINFREQ=1000
+g5k:NAT_CAPACITY=200000000
+g5k:CLICK_PATH=/root/fastclick-sleepmodes/bin/
+g5k:MAXCPU=15
+
+galadriel:FASTCLICK_SCRIPT_BUILDER=/etinfo/users2/delzotti/energy-aware-packet-scheduling/synced/build_pktgen_file.py
+galadriel:THROUGHPUT_SCRIPT_PATH=/etinfo/users2/delzotti/energy-aware-packet-scheduling/throughput_table.py
+galadriel:SLOTH_CSV=/etinfo/users2/delzotti/energy-aware-packet-scheduling/synced/optimums.csv
+galadriel:SLOTH_PATH=/etinfo/users2/delzotti/sloth/
+galadriel:NUMA_NODE=1
+galadriel:NPF_TEST_PATH_TEST=/etinfo/users2/delzotti/power/
+galadriel:trace=/etinfo/users2/delzotti/caida18-4x-ipv4-sanitized.pcap
+galadriel:MINFREQ=800
+
+sleep:GEN_RATE={1000000,16000000}
+sleep:FREQ={1800,3000}
+sleep:CPU={4,10}
+sleep:SLEEP_DELTA={1,8,16,32}
+
+socketdpdk:GEN_RATE=[1000-16001000#1000000]
+socketdpdk:FREQ=[1000-3900#100]
+socketdpdk:CPU=[1-10]
+
+replay_pf:CPU=4
+replay_pf:SLEEP_DELTA=1
+replay_pf:FREQ=1400
+replay_pf:GEN_RATE=1000000
+
+optimums:GEN_RATE=[1000-16001000#1000000]
+optimums:SLEEP_DELTA={1,2}
+optimums:FREQ=[800-3000#100]
+optimums:CPU=[1-16#2]
+
+applications:Method=NAT
+applications:WL=10
+applications:GEN_FLOWS=1024
+
+sloth:GEN_RATE={1000000, 4000000, 16000000}
+sloth:SLEEP_DELTA={1}
+sloth:FREQ=3900
+sloth:SLO_LATENCY=[20-50#10]
+sloth:CPU=10
+sloth:SLOTH_PATH=/etinfo/users2/tbarbette/workspace/energy-aware-packet-scheduling/sloth
+
+apps:Method={IPFilterDenyPMP,Fwd}
+apps:GEN_RATE={6000000}
+apps:SLEEP_DELTA={1}
+apps:FREQ=3900
+apps:SLO_LATENCY=50
+apps:CPU=10
+apps:SLOTH_PATH=/etinfo/users2/tbarbette/workspace/energy-aware-packet-scheduling/sloth
+apps:WL={1000, 100000}
+
+trace:FREQ=3900
+trace:SLO_LATENCY=[20-50#10]
+
+LIMIT_TIME=12
+BURST_SIZE={32}
+GEN_LENGTH=64
+INTERRUPTS=-1
+SLEEP_MODE={no_sleep}
+irq:SLEEP_MODE={no_sleep,hr2sleep_constant_simple,hr2sleep_add_simple,intr_add_simple,intr_constant_simple,intr_rtesleep_constant_power,intr_hr2sleep_constant_power,intr_hr2sleep_add_simple,hr2sleep_constant_power}
+final:SLEEP_MODE={no_sleep,hr2sleep_add_simple,hr2sleep_constant_simple,intr_add_simple,intr_hr2sleep_constant_power,intr_constant_simple,hr2sleep_mult_metronome,intr_mult_metronome}
+SUSPEND_THRESHOLD=256
+SLOTH_ENABLED={1}
+FASTCLICK_INTEGRATED_SLOTH={1}
+SLEEP_MAX=256
+SLOTH_CSV?=/root/energy-aware-packet-scheduling/optimums.csv
+//Divided in two : the mode (no_sleep ; hr_plus ; hr_fois ; u_plus ; u_fois ) then a - and then the multiplicating/summing factor to increment the sleeping time.
+//no_sleep doesn't sleep ; constant sleep during a determined time
+// hr_* and u_* sleep during dynamic time; the time increases at every poll with 0 new packets (cf. personnal implementation in FromDPDKDevice() of fastclick)
+//hr_* uses hr_sleep (cf. Metronome paper) ; u_* uses u_sleep (directly implemented in linux system)
+-dpdk:METHOD=LINUX
+socket:METHOD=AF_PACKET
+
+MAXCPU=15
+galadriel:MAXCPU=47
+
+LIMIT=1000000000
+SYSTEM_LOAD={1}
+FIRST_CPU=0
+NUMA_NODE?=1
+SLOTH_PATH?=/root/sloth/
+THROUGHPUT_FILE={16000000}
+
+
+trace:trace?=/root/caida18-4x-ipv4-sanitized.pcap
+trace:LIMIT=1000000
+trace:PAUSE=unset
+
+
+//Machine config
+//--------------
+jaskier:MAXCPU=7
+
+//Final experiments
+//-----------------
+
+//Manyfreq: The motivation experiment, fig1
+manyfreq:METHOD={AF_PACKET:AF_PACKET,:DPDK}
+
+
+%late_variables
+trace:TIMING_FNT=100*(1+(0.5*sin((max(1,x-10))^3 /3000 )/(max(5,(x/2)-5)/5)))*max(0.5,0.5 + 0.5*sin(pi/2 * max(1,(x/10)-6)))
+CLICK_TIMEOUT=EXPAND($LIMIT_TIME + 18)
+GEN_PAUSE?=unset
+NUMA?=true
+NDESC?=EXPAND($(( "16384" if "irq" in "$SLEEP_MODE" else "4096" )) )
+
+MINFREQ?=
+VNF?=EXPAND($Method)
+g5k:GOVERNOR?=performance
+GOVERNOR?=performance
+RX_VEC_EN?=EXPAND($(( "0" if $BURST_SIZE < 4 else "1" )) )
+NB_QUEUES?=EXPAND($CPU)
+
+%script@dut sudo=true critical=true autokill=false
+if [[ "$SLEEP_MODE" = *hr* ]] ; then
+    if dmesg | grep "HR_SLEEP: getting entry 134" ; then
+
+        echo "EVERYTHING OK, SLEEPING..."
+    else
+        echo "ERROR : HR_SLEEP is not loaded !!!"
+        exit 1
+    fi
+fi
+
+%config
+n_runs=1
+-noexpect:results_expect={WATT,RAM,THROUGHPUT,PPS,LAT99,AVG_TOTAL_POLLINGS,AVG_BUSY_POLLINGS,AVG_CYCLES_PER_POLLING,AVG_BURST_SIZE}
+-iterative:graph_filter_by={WATT:DROPPEDPC>0.01,MAXWATT:DROPPEDPC>0.01,LAT99:DROPPEDPC>0.01}
+accept_zero={IRQ,BEGIN_POLL,BEGIN_C1,BEGIN_C1E,BEGIN_C6,END_POLL,END_C1,END_C1E,END_C6,C6_TIME,C1E_TIME,C1_TIME,POLL_TIME,STD_BURST_SIZE,STD_CYCLES_PER_POLLING}
+timeout=60
+trace:timeout=120
+
+%require
+set -e
+
+test "$SLOTH_ENABLED" != "0" -o "$SLO_LATENCY" = "50"
+test "$SLEEP_MODE" != "hrsleep_add_simple_intr" -o "$CPU" != "6"
+test "$SLEEP_MODE" != "hrsleep_constant_power_intr" -o "$CPU" != "6"
+test "$SLEEP_MODE" != "hr2sleep_add_simple_intr" -o "$CPU" != "6"
+test "$SLEEP_MODE" != "hr2sleep_constant_power_intr" -o "$CPU" != "6"
+test "$SLEEP_MODE" != "add_simple_intr" -o "$CPU" != "6"
+
+! ( [[ "$SLEEP_MODE" =~ "mult" ]] && [ "$SLEEP_DELTA" -lt "2" ] )
+
+
+%-sleep:require
+//With sleep modes, we need to have a range freq, or it won't help
+[[ "$SLEEP_MODE" =~ "no_sleep" ]] || test "$MINFREQ" != "" || exit 1
+[[ "$SLEEP_MODE" =~ "add" ]] || test "$SLEEP_DELTA" -le "16"  || exit 1
+
+
+//This scripts sets the aforementioned frequency
+%script@dut sudo=true autokill=false
+echo ${MINFREQ}
+cpupower frequency-set -d $(( "$FREQ" if "$MINFREQ" == "" else "$MINFREQ" ))M -u ${FREQ}M
+cpupower frequency-set -g $GOVERNOR
+
+//This scripts sets the aforementioned frequency
+%script@client sudo=true autokill=false
+cpupower frequency-set -d 3200M -u 4000M
+cpupower frequency-set -g performance
+
+%stress:script@dut sudo=true autokill=false 
+//If there is 0 CPU, just run sleep
+echo "EVENT GEN_BEGIN"
+if [ $CPU -gt 0 ] ; then
+	TIMEOUT $TIME stress -c $CPU
+else
+	sleep $TIME
+fi
+
+
+%file@dut CONFIG_BEGIN
+
+elementclass VerifyIP {
+   input[0] ->  classifier  :: Classifier(
+    12/0800 /* IP packets */,
+    - /* everything else */);
+   classifier[0] -> CheckIPHeaderIMP(OFFSET 14) -> [0]output;
+   classifier[1] -> Discard;
+}
+elementclass DenyPMP {
+    [0] -> VerifyIP -> { [0] -> IPFilter(CACHING false, $((', '.join(['deny %d.%d.%d.%d/%d' % ( (i*i+i)%256, (i*i-i)%256, (i*i)%256, (i*i+22)%256, 16 + i%16) for i in range($WL)]) )), allow all) [0-1] -> [0]output} -> [0]
+}
+elementclass KVS {
+    [0] -> VerifyIP -> KVSBench(S $WL, VALUE_SIZE 128, OFFSET 16) -> [0]
+}
+elementclass DenyMP {
+    [0] -> MarkIPHeader(OFFSET 14) -> { [0] -> IPFilter(CACHING false, $((', '.join(['deny %d.%d.%d.%d' % ( (i*i+i)%256, (i*i-i)%256, (i*i)%256, (i*i+22)%256) for i in range($WL)]) )), allow all) [0-1] -> [0]output} -> [0]
+}
+
+elementclass Deny {
+	[0] ->  CheckIPHeader(OFFSET 14) -> { [0] -> IPFilter($((', '.join(['deny %d.%d.%d.%d' % ( (i*i+i)%256, (i*i-i)%256, (i*i)%256, (i*i+22)%256) for i in range($WL)]) )), allow all) [0-1] -> [0]output} -> [0]
+}
+
+elementclass Allow {
+ [0] -> CheckIPHeader(OFFSET 14) -> IPFilter($((', '.join(['allow %d.%d.%d.%d' % ( (i*i+i)%256, (i*i-i)%256, (i*i)%256, (i*i+22)%256) for i in range($WL)]) )), allow all) -> [0]
+}
+
+%file@dut CONFIG_END
+DriverManager(print '', print 'EVENT CLICK_READY', wait, print "RESULT-IRQ $(fd.nb_irq_wakeups)", read fd.xstats);
+Script(TYPE ACTIVE, wait 1s, read load,set t $(now), set l $(add $(load)), print "LOAD-$t-RESULT-LOAD $l", loop);
+
+%dpdk:file@dut CONFIG_IO
+DPDKInfo(NB_MBUF 1048575)
+fd :: FromDPDKDevice(0, MAXTHREADS $CPU, VERBOSE 99, PROMISC true, PAUSE $(( "unset" if "$METHOD" == "AF_PACKET" else "none" )), SLEEP_MODE $SLEEP_MODE, SLEEP_DELTA $SLEEP_DELTA, SLEEP_MAX $SLEEP_MAX, SUSPEND_THRESHOLD $SUSPEND_THRESHOLD, NUMA $NUMA, BURST $BURST_SIZE, NDESC $NDESC, MINQUEUES $NB_QUEUES, MAXQUEUES $NB_QUEUES,SLOTH_LAT $SLO_LATENCY, SLOTH_OPTIMUMS $SLOTH_CSV)
+
+td :: ToDPDKDevice(0, VERBOSE 99, NDESC 1024);
+
+%-dpdk:file@dut CONFIG_IO jinja
+fd :: Null;
+td :: ThreadSafeQueue -> ToDevice(${self:0:ifname}, METHOD $METHOD);
+
+{% for i in range($CPU) %}
+    fd{{i}} :: FromDevice(${self:0:ifname}, SNIFFER false, PROMISC true, METHOD $METHOD) -> fd;
+    //td[{{i}}] ->  q;
+    StaticThreadSched(fd{{i}} {{i}})
+    //;, td{{i}} {{i}});
+{% endfor %}
+
+%script@dut sudo=true autokill=true
+insmod ~/Metronome/hr_sleep/hr_sleep.ko &> /dev/null
+
+if [ "$VNF" == "WorkPackage" ]; then 
+	FILE="$FILE -> WorkPackage(W $WL)"
+elif [[ "$VNF" == *"KVS"* ]]; then
+    FILE="$FILE -> KVS()"
+elif [[ "$VNF" == *"IPFilterDenyMP"* ]]; then
+    FILE="$FILE -> DenyMP()"
+elif [[ "$VNF" == *"IPFilterDenyPMP"* ]]; then
+    FILE="$FILE -> DenyPMP()"
+elif [ "$VNF" == "IPFilterDeny" ]; then
+    FILE="$FILE -> Deny()"
+elif [ "$VNF" == "IPFilterAllow" ]; then
+	FILE="$FILE -> Allow()"
+elif [ "$VNF" == "Fwd" ]; then
+	FILE="$FILE"
+fi
+
+if [[ "$VNF" == *"NAT"* ]]; then
+    FILE="$FILE -> VerifyIP -> FlowIPManagerIMP(CAPACITY 30000000, TIMEOUT 60) -> FlowIPLoadBalancer(DST 1.0.0.1, VIP ${self:0:ip}, NONSYN true)"
+fi
+
+if [ "$VNF" == "Fwd" ]; then
+	FILE="$FILE"
+fi
+
+FILE="fd
+$FILE -> EtherMirror -> td;
+"
+
+cat CONFIG_BEGIN > C
+cat CONFIG_IO >> C
+cat CONFIG_END >> C
+echo $FILE >> C
+cp C /tmp/
+
+echo "Launching click..."
+echo "GEN_RATE is "${GEN_RATE}
+echo "SLEEP_DELTA is "${SLEEP_DELTA}
+echo "Sleep mode is ${SLEEP_MODE}"
+echo "Timeout is ${CLICK_TIMEOUT}"
+echo "Disk usage of C is " $(du -h C) 
+if [ $CPU -gt 0 ] ; then
+    if [ "$METHOD" == "AF_PACKET" ] ; then
+        ethtool -L ${self:0:ifname} combined $CPU
+        set_irq_affinity.sh ${self:0:ifname}
+        click --dpdk --vdev=eth_af_packet0,iface=${self:0:ifname},blocksz=4096,framesz=2048,framecnt=512,qpairs=$CPU,qdisc_bypass=1 --no-pci -l 0-$MAXCPU -- C
+    else
+        # gdb -ex run -ex "signal 2" -ex "bt" -batch -args
+        timeout --foreground --signal=SIGINT $(echo ${CLICK_TIMEOUT}|bc) ${CLICK_PATH}click --dpdk -a ${self:0:pci},rx_vec_en=$RX_VEC_EN -l 0-$MAXCPU -- C
+    fi
+fi
+r=$?
+sleep 5
+echo "End of click"
+exit $r
+
+
+//This script will run rapl, to read the power info from the INTEL CPU itself. It launches the command right in the middle of the test
+%-iterative:script@dut sudo=true waitfor=GEN_BEGIN autokill=false delay=1
+echo ${NPF_TEST_PATH_TEST}
+echo "Doing WATT stuff"
+timeout 5 ${NPF_TEST_PATH_TEST}/rapl-read | tee rapl.log
+echo "rapl.log content :"
+cat rapl.log
+echo "RESULT-WATT $(cat rapl.log | grep package-${NUMA_NODE} | rev | cut -d ' ' -f 1 | rev)"
+echo "RESULT-RAM $(cat rapl.log | grep -A 1 package-${NUMA_NODE} | grep dram | rev | cut -d ' ' -f 1 | rev)"
+echo "End of RAPL"
+
+%iterative:script@dut sudo=true waitfor=GEN_BEGIN autokill=false delay=1
+for t in $(seq 60)  ; do
+    timeout 5 ${NPF_TEST_PATH_TEST}/rapl-read | tee rapl.log
+    echo "NRJ-$t-RESULT-WATT $(cat rapl.log | grep package-${NUMA_NODE} | rev | cut -d ' ' -f 1 | rev)"
+    echo "NRJ-$t-RESULT-RAM $(cat rapl.log | grep -A 1 package-${NUMA_NODE} | grep dram | rev | cut -d ' ' -f 1 | rev)"
+done
+echo "End of RAPL"
+
+
+
+//This script will run idle_info, to read the power-state info from the INTEL CPU itself. It launches a command right in the beginning of the test and at the end
+%script@dut sudo=true waitfor=GEN_BEGIN autokill=false
+for f in /sys/devices/system/cpu/cpu${FIRST_CPU}/cpuidle/state* ; do
+        echo "RESULT-BEGIN_$(cat $f/name) $(cat $f/time)"
+done
+
+sleep 5
+
+for f in /sys/devices/system/cpu/cpu${FIRST_CPU}/cpuidle/state* ; do
+        echo "RESULT-END_$(cat $f/name) $(cat $f/time)"
+done
+
+//The current watt is read through the IMPI, the program to be used depends on the vendor.
+//This one is from supermicro
+%supermicro:file@dut READ_POWER
+function power() {
+    sudo ${NPF_TEST_PATH_TEST}/../IPMICFG_1.34.0_build.220906/Linux/64bit/IPMICFG-Linux.x86_64 -dcmi power &> stats.log
+    local pw=$(cat stats.log | grep -i Instant | grep -oE "[0-9]+")
+    echo $pw
+}
+
+#This script uses one of the IPMI method to read the real-time power consumption during the whole test
+%supermicro:script@dut autokill=false waitfor=GEN_BEGIN
+source READ_POWER
+
+i=0
+while true ; do
+    sleep 1
+    pw=$(power)
+    echo "PWR-$i-RESULT-INSTANT $pw"
+    i=$(echo "$i + 1" |  bc)
+    if [ $i -gt $(( $LIMIT_TIME - 1 )) ] ; then
+            break
+    fi
+done
+
+%g5k:script@dut waitfor=GEN_BEGIN delay=5 autokill=false
+python3 ~/energy-aware-packet-scheduling/synced/read_g5k_power.py
+
+
+//Post-processing of results in python
+%pyexit
+import numpy as np
+import itertools
+
+//We read the wattage during the whole test, we want to compute the maximum observe wattage
+if 'PWR' in KIND_RESULTS:
+  RESULTS['MAXWATT'] = 0
+  for RUN,RESULT in KIND_RESULTS['PWR'].items():
+    RESULTS['MAXWATT'] = max(RESULT['INSTANT'],RESULTS['MAXWATT'])
+
+if 'LOAD' in KIND_RESULTS:
+  RESULTS['LOAD_AVG'] = []
+  for RUN,RESULT in KIND_RESULTS['LOAD'].items():
+    RESULTS['LOAD_AVG'].append(RESULT['LOAD'])
+  a = RESULTS['LOAD_AVG']
+  avg = np.average(a)
+  a=itertools.dropwhile(lambda x:x<avg/2,a)
+  a=itertools.takewhile(lambda x:x>=avg/2,a)
+  RESULTS['LOAD_AVG'] = list(a)
+
+
+if 'MAXWATT' in RESULTS and RESULTS['MAXWATT'] != 0 and 'PPS' in RESULTS:
+    RESULTS['RPWATTPS'] = RESULTS['PPS']/RESULTS['MAXWATT']
+
+    #Compute the watts per clock
+    RESULTS['WATTPERCLOCK'] = CPU * FREQ / RESULTS['MAXWATT']
+
+
+tot_c = 0
+for c_state in ['POLL', 'C1', 'C1E', 'C2', 'C6']:
+    begin='BEGIN_'+c_state
+    end='END_'+c_state
+    if begin in RESULTS and end in RESULTS:
+        d = RESULTS[end] - RESULTS[begin]
+        RESULTS[c_state+'_TIME'] = d
+        tot_c += d
+        del RESULTS[end]
+        del RESULTS[begin]
+RESULTS['TOTAL_CIDLE'] = tot_c
+
+%script@dut sudo=true autokill=false waitfor=CLICK_READY
+if [ "${SLOTH_ENABLED}" == "1" ]; then
+    echo "Setting up SLOTH..." 
+    echo "Setting CPU freq at maximum"
+    cpupower frequency-set -d 1000M -u 3900M
+    cpupower frequency-set -g performance
+    if [ "${FASTCLICK_INTEGRATED_SLOTH}" == "0" ]; then
+        echo "EVENT SLOTH_INIT"
+        ./build/sloth -l 17 --proc-type=secondary -- -l ${SLO_LATENCY} -f $SLOTH_CSV
+    fi
+fi
+echo "EVENT SLOTH_INIT"
+echo ${GEN_RATE}
+sleep 100
+
+%-trace:import@client fastclick-play-single-mt waitfor=SLOTH_INIT autokill=false delay=0
+%trace:import@client fastclick-replay-single-mt-timing waitfor=SLOTH_INIT delay=0
