@@ -16,9 +16,10 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 import utils
 from AsynchronousLauncher import AsynchronousLauncher
 
-CLUSTER="gros"
-SITE="nancy"
-IMAGE_PATH="https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml"
+CLUSTER="parasilo"
+SITE="rennes"
+USER="evillett"
+IMAGE_PATH="https://api.grid5000.fr/sid/sites/{SITE}/public/{USER}/img/dpdk-{CLUSTER}-nfs-nokey.yaml"
 NPF_DEFAULT_FILE = "synced/test_dpdk.npf"
 
 ####################
@@ -110,6 +111,7 @@ if job_id is None:
                                 walltime=f"{nb_hours}:00:00",
                                 # Only 1 switch
                                 # switch=1,
+                                key="~/.ssh/id_ed25519.pub",
                                 dhcp=False).add_network_conf(private_net)
 else:
     print(f"Reloading job {job_id}")
@@ -117,6 +119,7 @@ else:
                                 job_type=["deploy"],
                                 env_name=f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml",
                                 oargrid_jobids=[[SITE, job_id]],
+                                key="~/.ssh/id_ed25519.pub",
                                 dhcp=False).add_network_conf(private_net)
 
 for i in range(NB_PAIRS):
@@ -129,7 +132,7 @@ for i in range(NB_PAIRS):
 conf = (reservation_base)
 
 # Get actual resources
-roles, networks, provider = utils.init_ressources(en, conf, must_bind=CLUSTER=="paravance", start_time=start_date)
+roles, networks, provider = utils.init_ressources(en, conf, must_bind=CLUSTER=="parasilo", start_time=start_date)
 
 ####################
 # Prepare Machines #
@@ -140,14 +143,14 @@ print(("Syncing files..."))
 for i in range(NB_PAIRS):
     client_hostname = list(roles[f"client{i}"].data)[0].address
     server_hostname = list(roles[f"server{i}"].data)[0].address
-    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{server_hostname}.nancyg5k:/root/energy-aware-packet-scheduling/")
-    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{client_hostname}.nancyg5k:/root/energy-aware-packet-scheduling/")
+    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{server_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
+    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{client_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
     
 # Keep a list of running commands
 asyncLauncher = AsynchronousLauncher(en)
 running_commands = []
 for i in range(NB_PAIRS):
-    os.system(f"scp -o StrictHostKeyChecking=no {npf_files[i]} root@{client_hostname}.nancy_g5k:/root/npf_script.npf")
+    os.system(f"scp -o StrictHostKeyChecking=no {npf_files[i]} root@{client_hostname}.{SITE}_g5k:/root/npf_script.npf")
     # Up the interface
     # Set interfaces IPs
     CLIENT_IP=f"192.168.192.{i*2}/20"
@@ -210,11 +213,11 @@ for i in range(NB_PAIRS):
     with open(f"{CLUSTER_DIR}/{server_hostname}.node", "w") as f:
         f.write(cluster_template)
     
-    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{client_hostname}.node root@{client_hostname}.nancy_g5k:/root/cluster/{client_hostname}.node")
-    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{server_hostname}.node root@{client_hostname}.nancy_g5k:/root/cluster/{server_hostname}.node")
+    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{client_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{client_hostname}.node")
+    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{server_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{server_hostname}.node")
     
     # Run experiment
-    SOURCE_DATA_DIR="/root/energy-aware-packet-scheduling/results/fnancy/"
+    SOURCE_DATA_DIR="/root/energy-aware-packet-scheduling/results/f{SITE}/"
     # Clean the results directory
     en.run_command(f"rm -rf {SOURCE_DATA_DIR}/*", roles=roles[f"pair{i}"])
     # Create local environment directory
@@ -225,14 +228,14 @@ for i in range(NB_PAIRS):
         f.write(f"export CLIENT={client_hostname}\n")
         f.write(f"export SERVER={server_hostname}\n")
         f.write(f"export PATH=/root/npf:$PATH\n")
-        f.write("export HOSTNAME=fnancy\n")
+        f.write(f"export HOSTNAME=f{SITE}\n")
         f.write(f"export INsrcmac={client_mac}\n")
         f.write(f"export INdstmac={server_mac}\n")
         f.write("export NODE_MIN_FREQ=1000\n")
         f.write("export SAMPLE=10\n")
         f.write("export LIMIT=500000000\n")
     
-    os.system(f"scp -o StrictHostKeyChecking=no envs/env_{i}.sh root@{client_hostname}.nancy_g5k:/root/.env.sh")
+    os.system(f"scp -o StrictHostKeyChecking=no envs/env_{i}.sh root@{client_hostname}.{SITE}_g5k:/root/.env.sh")
     
     running_commands.append(
         asyncLauncher.run_command(f"/root/energy-aware-packet-scheduling/runAll.sh g5k ~/.env.sh /root/npf_script.npf {experiment_id} {i} | tee /nfs/log_{i}.donotcommit", roles=roles[f"client{i}"], run_locally=False)
