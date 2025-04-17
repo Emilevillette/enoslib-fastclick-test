@@ -1,0 +1,170 @@
+make: Entering directory '/root/fastclick'
+/bin/sh ./configure  '--enable-bound-port-transfer' '--enable-flow' '--disable-task-stats' '--disable-cpu-load' '--enable-dpdk-packet' '--disable-clone' '--disable-dpdk-softqueue' '--disable-analysis' '--disable-app' '--disable-aqm' '--disable-simple' '--disable-tcpudp' '--disable-test' '--disable-flow' '--enable-valgrind' '--enable-dmalloc' '--enable-dpdk' '--enable-batch' '--with-netmap=no' '--enable-zerocopy' '--enable-vector' '--disable-avx512'
+checking build system type... x86_64-pc-linux-gnu
+checking host system type... x86_64-pc-linux-gnu
+checking target system type... x86_64-pc-linux-gnu
+checking for gcc... gcc
+checking for g++... g++
+checking for gcc... (cached) gcc
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether the compiler supports GNU C... yes
+checking whether gcc accepts -g... yes
+checking for gcc option to enable C11 features... none needed
+checking for stdio.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for strings.h... yes
+checking for sys/stat.h... yes
+checking for sys/types.h... yes
+checking for unistd.h... yes
+checking for sys/mman.h... yes
+checking for sys/param.h... yes
+checking whether the C compiler accepts -W -Wall... yes
+checking whether the C compiler accepts -Werror... yes
+checking how to run the C preprocessor... gcc -E
+checking for inline... inline
+checking whether the compiler supports GNU C++... yes
+checking whether g++ accepts -g... yes
+checking for g++ option to enable C++11 features... none needed
+checking whether <new> works... yes
+checking whether the C++ compiler understands 'auto'... yes
+checking whether the C++ compiler understands constexpr... yes
+checking whether the C++ compiler understands rvalue references... yes
+checking whether the C++ compiler understands static_assert... yes
+checking whether the C++ compiler understands template alias... yes
+checking whether the C++ compiler understands #pragma interface... yes
+checking how to run the C++ preprocessor... g++ -E
+checking whether C++ compiler accepts -Winconsistent-missing-override... no
+checking for ar... ar
+checking for ld... ld
+checking for nm... nm
+checking for objcopy... objcopy
+checking for ranlib... ranlib
+checking for readelf... readelf
+checking for strip... strip
+checking for library containing pthread_create... none required
+checking for pthread.h... yes
+checking for g++ options needed to detect all undeclared functions... none needed
+checking whether pthread_setaffinity_np is declared... yes
+checking for library containing mbg_open_device... no
+checking for mbgdevio.h... no
+checking for library containing bpf_prog_load_xattr... no
+checking for bpf/bpf.h... no
+checking for library containing curl_global_init... no
+checking for curl/curl.h... no
+checking for library containing elf_version... no
+checking for library containing MHD_start_daemon... -lmicrohttpd
+checking for microhttpd.h... yes
+checking for main in -lre2... no
+checking for re2/re2.h... no
+checking for hs_compile_multi in -lhs... no
+checking for hs/hs.h... no
+checking for library containing PAPI_start_counters... no
+checking for papi.h... no
+checking for main in -lpci... no
+checking for pci/pci.h... no
+checking whether we are compiling for Linux... yes
+checking whether we are compiling for Apple Mach... no
+checking for strerror... yes
+checking for random... yes
+checking for snprintf... yes
+checking for strnlen... yes
+checking for strtof... yes
+checking for strtold... yes
+checking for strtoul... yes
+checking for tcgetpgrp... yes
+checking for vsnprintf... yes
+checking for aligned_alloc... yes
+checking size of int... 4
+checking size of long... 8
+checking size of size_t... 8
+checking size of ptrdiff_t... 8
+checking size of void *... 8
+checking for egrep -e... /usr/bin/grep -E
+checking whether char is unsigned... no
+checking whether machine is indifferent to alignment... yes
+checking size of long long... 8
+checking for long long... yes
+checking for int64_t... yes
+checking for uint64_t... yes
+checking whether long and int64_t are the same type... yes
+checking whether long long and int64_t are the same type... no
+checking for endian.h... yes
+checking for machine/endian.h... no
+checking for byteswap.h... yes
+checking for time.h... yes
+checking for dlfcn.h... yes
+checking for termio.h... yes
+checking for netdb.h... yes
+checking for sys/event.h... no
+checking for pwd.h... yes
+checking for grp.h... yes
+checking for execinfo.h... yes
+checking for poll.h... yes
+checking for ifaddrs.h... yes
+checking for linux/ethtool.h... yes
+checking for linux/sockios.h... yes
+checking for linux/if_tun.h... yes
+checking for linux/if_packet.h... yes
+checking for linux/netlink.h... yes
+checking for net/if_dl.h... no
+checking for net/if_tap.h... no
+checking for net/if_tun.h... no
+checking for net/if_types.h... no
+checking for net/bpf.h... no
+checking for netpacket/packet.h... yes
+checking whether byte ordering is bigendian... no
+checking whether signed right shift is arithmetic... yes
+checking for addressable va_list type... no
+checking for __builtin_ctz... yes
+checking for __builtin_clz... yes
+checking for __builtin_clzl... yes
+checking for __builtin_clzll... yes
+checking for __builtin_ffs... yes
+checking for __builtin_ffsl... yes
+checking for __builtin_ffsll... yes
+checking for __builtin_popcount... yes
+checking for __sync_synchronize... yes
+checking whether __sync_synchronize supports arguments... no
+checking for __is_trivially_copyable... yes
+checking for __has_trivial_copy... yes
+checking for __thread storage class support... yes
+checking for ffs... yes
+checking for ffsl... yes
+checking for ffsll... yes
+checking whether g++ supports C++17 features by default... yes
+checking size of struct timeval... 16
+checking for struct timespec... yes
+checking size of struct timespec... 16
+checking whether clock_gettime is declared... yes
+checking for library containing clock_gettime... none required
+checking for clock_gettime... yes
+checking whether C++ compiler accepts -faligned-new... yes
+checking for dlopen in -ldl... yes
+checking whether linker accepts the -rdynamic flag... yes
+checking compiler flags for building loadable modules... -shared
+checking whether <poll.h> is emulated... no
+checking for pselect... yes
+checking for sigaction... yes
+checking for kqueue... no
+checking for library containing gethostbyname... none required
+checking for library containing connect... none required
+checking whether accept() uses socklen_t... yes
+checking for large file support in C library... yes
+checking size of off_t... 8
+checking for getpagesize... yes
+checking for working mmap... yes
+checking for madvise... yes
+checking whether madvise is declared... yes
+configure: --enable-rsspp needs --enable-cpu-load
+checking for ./include/click/flowruleparser.hh... yes
+checking for ./include/click/flowrulecache.hh... yes
+checking for ./include/click/flowrulemanager.hh... yes
+checking for valgrind/memcheck.h... no
+make: Leaving directory '/root/fastclick'

@@ -1,32 +1,58 @@
-import time
 import logging
 import os
+import time
 from pathlib import Path
 import enoslib as en
+import re
+
+def replace_mac_addresses(lua_path, new_src_mac, new_dst_mac, output_path=None):
+    """
+    Replace srcmac and dstmac values in a Lua script with new MAC addresses.
+
+    Args:
+        lua_path (str): Path to the input Lua file.
+        new_src_mac (str): New source MAC address (e.g., "aa:bb:cc:dd:ee:ff").
+        new_dst_mac (str): New destination MAC address (e.g., "11:22:33:44:55:66").
+        output_path (str, optional): Path to write the modified file.
+                                     If None, overwrite the original file.
+    """
+    with open(lua_path, "r") as f:
+        content = f.read()
+
+    # Replace srcmac and dstmac with the new values
+    content = re.sub(r'srcmac\s*=\s*"[0-9a-fA-F:]{17}"', f'srcmac = "{new_src_mac}"', content)
+    content = re.sub(r'dstmac\s*=\s*"[0-9a-fA-F:]{17}"', f'dstmac = "{new_dst_mac}"', content)
+
+    # Write to file
+    out_path = output_path if output_path else lua_path
+    with open(out_path, "w") as f:
+        f.write(content)
+
+    print(f"MAC addresses updated in '{out_path}'.")
+
 # Import grid_reload_jobs_from_ids
-import pandas as pd
-import sys
 
 en.init_logging(level=logging.INFO)
 en.check()
 
 # Import the utils module from the parent directory
 import sys
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 import utils
 from AsynchronousLauncher import AsynchronousLauncher
 
-CLUSTER="parasilo"
-SITE="rennes"
-USER="evillett"
-IMAGE_PATH="https://api.grid5000.fr/sid/sites/{SITE}/public/{USER}/img/dpdk-{CLUSTER}-nfs-nokey.yaml"
+CLUSTER = "gros"
+SITE = "nancy"
+USER = "evillett"
+IMAGE_PATH = f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml"
 NPF_DEFAULT_FILE = "synced/test_dpdk.npf"
 
 ####################
 # Argument parsing #
 ####################
 
-NB_PAIRS=1
+NB_PAIRS = 1
 start_date = None
 experiment_id = None
 npf_dir = ""
@@ -46,20 +72,20 @@ if "--help" in sys.argv:
 
 for i, arg in enumerate(sys.argv):
     if arg == "--pairs":
-        NB_PAIRS = int(sys.argv[i+1])
+        NB_PAIRS = int(sys.argv[i + 1])
     if arg == "--start-date":
-        start_date = sys.argv[i+1]
+        start_date = sys.argv[i + 1]
     if arg == "--hours":
-        nb_hours = int(sys.argv[i+1])
+        nb_hours = int(sys.argv[i + 1])
     if arg == "--split-variable":
-        split_variable = sys.argv[i+1]
+        split_variable = sys.argv[i + 1]
     if arg == "--continue":
-        experiment_id = sys.argv[i+1]
+        experiment_id = sys.argv[i + 1]
         print(f"Continuing experiment {experiment_id}")
     if arg == "--npf-files":
-        npf_dir = sys.argv[i+1]
+        npf_dir = sys.argv[i + 1]
     if arg == "--job-id":
-        job_id = sys.argv[i+1]
+        job_id = sys.argv[i + 1]
 
 ##################################
 # Generate or retrieve NPF files #
@@ -99,53 +125,57 @@ if experiment_id == "auto":
 # Get resources  #
 ##################
 
-private_net = en.G5kNetworkConf(type="kavlan", roles=["private"], site=SITE,id="1+") 
+private_net = en.G5kNetworkConf(type="kavlan", roles=["private"], site=SITE, id="1+")
 
-    # nb_hours = 4
+# nb_hours = 4
 
 if job_id is None:
-    reservation_base = en.G5kConf.from_settings(job_name="testing stuff",
-                                job_type=["deploy"],
-                                env_name=f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml",
-                                # Make the reservation last 9 hours
-                                walltime=f"{nb_hours}:00:00",
-                                # Only 1 switch
-                                # switch=1,
-                                key="~/.ssh/id_ed25519.pub",
-                                dhcp=False).add_network_conf(private_net)
+    reservation_base = en.G5kConf.from_settings(job_name="FastClick experiments",
+                                                job_type=["deploy"],
+                                                env_name=f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml",
+                                                # Make the reservation last 9 hours
+                                                walltime=f"{nb_hours}:00:00",
+                                                # Only 1 switch
+                                                # switch=1,
+                                                key="~/.ssh/id_ed25519.pub",
+                                                dhcp=False).add_network_conf(private_net)
 else:
     print(f"Reloading job {job_id}")
-    reservation_base = en.G5kConf.from_settings(job_name="testing stuff",
-                                job_type=["deploy"],
-                                env_name=f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml",
-                                oargrid_jobids=[[SITE, job_id]],
-                                key="~/.ssh/id_ed25519.pub",
-                                dhcp=False).add_network_conf(private_net)
+    reservation_base = en.G5kConf.from_settings(job_name="FastClick experiments",
+                                                job_type=["deploy"],
+                                                env_name=f"https://api.grid5000.fr/sid/sites/{SITE}/public/cdelzotti/img/dpdk-{CLUSTER}-nfs-nokey.yaml",
+                                                oargrid_jobids=[[SITE, job_id]],
+                                                key="~/.ssh/id_ed25519.pub",
+                                                dhcp=False).add_network_conf(private_net)
 
 for i in range(NB_PAIRS):
     reservation_base.add_machine(roles=[f"client{i}", f"pair{i}"], cluster=CLUSTER, nodes=1
-                                ,secondary_networks=[private_net]
-                                )
+                                 , secondary_networks=[private_net]
+                                 )
     reservation_base.add_machine(roles=[f"server{i}", f"pair{i}"], cluster=CLUSTER, nodes=1
-                                ,secondary_networks=[private_net]
-                                )
+                                 , secondary_networks=[private_net]
+                                 )
 conf = (reservation_base)
 
 # Get actual resources
-roles, networks, provider = utils.init_ressources(en, conf, must_bind=CLUSTER=="parasilo", start_time=start_date)
+roles, networks, provider = utils.init_ressources(en, conf, must_bind=CLUSTER == "paravance", start_time=start_date)
+
+print(roles)
 
 ####################
 # Prepare Machines #
 ####################
 
 # Sync local files to the nodes
-print(("Syncing files..."))
+print("Syncing files...")
 for i in range(NB_PAIRS):
     client_hostname = list(roles[f"client{i}"].data)[0].address
     server_hostname = list(roles[f"server{i}"].data)[0].address
-    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{server_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
-    os.system(f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{client_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
-    
+    os.system(
+        f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{server_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
+    os.system(
+        f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{client_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
+
 # Keep a list of running commands
 asyncLauncher = AsynchronousLauncher(en)
 running_commands = []
@@ -153,9 +183,9 @@ for i in range(NB_PAIRS):
     os.system(f"scp -o StrictHostKeyChecking=no {npf_files[i]} root@{client_hostname}.{SITE}_g5k:/root/npf_script.npf")
     # Up the interface
     # Set interfaces IPs
-    CLIENT_IP=f"192.168.192.{i*2}/20"
+    CLIENT_IP = f"192.168.192.{i * 2}/20"
     print(f"Client IP: {CLIENT_IP}")
-    SERVER_IP=f"192.168.192.{i*2+1}/20"
+    SERVER_IP = f"192.168.192.{i * 2 + 1}/20"
     print(f"Server IP: {SERVER_IP}")
     results = en.run_command("ip link set eno2 up", roles=roles[f"pair{i}"])
     try:
@@ -169,9 +199,10 @@ for i in range(NB_PAIRS):
     client_hostname = list(roles[f"client{i}"].data)[0].address
     server_hostname = list(roles[f"server{i}"].data)[0].address
     # Get MAC addresses
-    client_mac = en.run_command("ip link show eno2 | awk '/ether/ {print $2}'", roles=roles[f"client{i}"])[0].payload["stdout"]
-    server_mac = en.run_command("ip link show eno2 | awk '/ether/ {print $2}'", roles=roles[f"server{i}"])[0].payload["stdout"]
-
+    client_mac = en.run_command("ip link show eno2 | awk '/ether/ {print $2}'", roles=roles[f"client{i}"])[0].payload[
+        "stdout"]
+    server_mac = en.run_command("ip link show eno2 | awk '/ether/ {print $2}'", roles=roles[f"server{i}"])[0].payload[
+        "stdout"]
 
     # Load Metronome kernel module
     try:
@@ -190,39 +221,43 @@ for i in range(NB_PAIRS):
     except:
         pass
 
-    CLUSTER_DIR=f"./cluster"
+    CLUSTER_DIR = f"./cluster"
     NODE_TEMPLATE = f"{CLUSTER_DIR}/node-{CLUSTER}.node"
-    
+
     # Open template and read the content
     with open(NODE_TEMPLATE, "r") as f:
         cluster_template = f.read()
-        
+
     # Set client cluster
-        
+
     # Add customized lines
     cluster_template += f"0:mac={client_mac}\n"
     cluster_template += f"0:ip={CLIENT_IP[:-3]}\n"
     # Write the new content to the file
     with open(f"{CLUSTER_DIR}/{client_hostname}.node", "w") as f:
         f.write(cluster_template)
-        
+
     # Set server cluster
     cluster_template = cluster_template.replace(client_mac, server_mac)
     cluster_template = cluster_template.replace(CLIENT_IP[:-3], SERVER_IP[:-3])
-    
+
+    replace_mac_addresses("pktgen/cfg.lua", server_mac, client_mac)
+
     with open(f"{CLUSTER_DIR}/{server_hostname}.node", "w") as f:
         f.write(cluster_template)
-    
-    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{client_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{client_hostname}.node")
-    os.system(f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{server_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{server_hostname}.node")
-    
+
+    os.system(
+        f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{client_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{client_hostname}.node")
+    os.system(
+        f"scp -o StrictHostKeyChecking=no {CLUSTER_DIR}/{server_hostname}.node root@{client_hostname}.{SITE}_g5k:/root/cluster/{server_hostname}.node")
+
     # Run experiment
-    SOURCE_DATA_DIR="/root/energy-aware-packet-scheduling/results/f{SITE}/"
+    SOURCE_DATA_DIR = f"/root/energy-aware-packet-scheduling/results/f{SITE}/"
     # Clean the results directory
     en.run_command(f"rm -rf {SOURCE_DATA_DIR}/*", roles=roles[f"pair{i}"])
     # Create local environment directory
     os.makedirs(f"envs", exist_ok=True)
-    
+
     # Create the environment file
     with open(f"envs/env_{i}.sh", "w") as f:
         f.write(f"export CLIENT={client_hostname}\n")
@@ -234,17 +269,50 @@ for i in range(NB_PAIRS):
         f.write("export NODE_MIN_FREQ=1000\n")
         f.write("export SAMPLE=10\n")
         f.write("export LIMIT=500000000\n")
-    
+
+    print(client_hostname)
+    print(server_hostname)
+
     os.system(f"scp -o StrictHostKeyChecking=no envs/env_{i}.sh root@{client_hostname}.{SITE}_g5k:/root/.env.sh")
-    
-    running_commands.append(
-        asyncLauncher.run_command(f"/root/energy-aware-packet-scheduling/runAll.sh g5k ~/.env.sh /root/npf_script.npf {experiment_id} {i} | tee /nfs/log_{i}.donotcommit", roles=roles[f"client{i}"], run_locally=False)
+
+    os.system(
+        f"rsync -avz --exclude '.git/' --exclude '.idea/'  -e 'ssh -o StrictHostKeyChecking=no' /home/emile/cours/UCLouvain/TFE/fastclick root@{client_hostname}.{SITE}_g5k:/root/")
+
+    os.system(
+        f"scp -o StrictHostKeyChecking=no pktgen/cfg.lua root@{server_hostname}.{SITE}_g5k:/root/cfg.lua")
+
+    os.system(
+        f"scp -o StrictHostKeyChecking=no /home/emile/cours/UCLouvain/TFE/TFE-utils/enoslib/dpdk-23.03.tar.xz root@{server_hostname}.{SITE}_g5k:/root/"
     )
-    
+
+    # unpack dpdk
+    running_commands.append(
+        asyncLauncher.run_command(
+            f'tar -xf dpdk-23.03.tar.xz && rm dpdk-23.03.tar.xz',
+            roles=roles[f"server{i}"], run_locally=False
+        )
+    )
+
+    running_commands.append(
+        asyncLauncher.run_command(
+            f'apt install valgrind && /root/fastclick/configure CFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" CXXFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" --enable-dpdk --enable-bound-port-transfer --enable-flow --disable-task-stats --disable-cpu-load --enable-dpdk-packet --disable-clone --disable-dpdk-softqueue --disable-analysis --disable-app --disable-aqm --disable-simple --disable-tcpudp --disable-test --disable-threads --disable-flow --enable-vector --enable-dpdk-pool && make -j 16 -C /root/fastclick/ install && /usr/local/bin/click --dpdk -c 0xf -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl.click',
+            roles=roles[f"client{i}"], run_locally=False)
+    )
+
+    time.sleep(30)
+
+    running_commands.append(
+        asyncLauncher.run_command(
+            'apt install -y  liblua5.4-dev lua5.4 && cd /root/dpdk-23.03 && meson setup build -Dprefix=$(pwd)/install && export DPDK_PATH=$(pwd)/install && cd build && ninja && ninja install && export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/ && export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH && cd /root/ && rm -rf Pktgen-DPDK && git clone https://github.com/Emilevillette/Pktgen-DPDK.git && cd Pktgen-DPDK && git checkout working_lua && make buildlua && /root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m "[1:2].0" -f /root/cfg.lua',
+            roles=roles[f"server{i}"], run_locally=False
+        )
+    )
+
+
 ####################
 # Wait for results #
 ####################
-    
+
 # Wait for all the commands to finish
 for i in range(len(running_commands)):
     running_commands[i].wait(polling_interval=15)
