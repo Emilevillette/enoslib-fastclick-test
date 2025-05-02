@@ -4,6 +4,8 @@ import time
 from pathlib import Path
 import enoslib as en
 import re
+from datetime import datetime
+
 
 def replace_mac_addresses(lua_path, new_src_mac, new_dst_mac, output_path=None):
     """
@@ -29,6 +31,7 @@ def replace_mac_addresses(lua_path, new_src_mac, new_dst_mac, output_path=None):
         f.write(content)
 
     print(f"MAC addresses updated in '{out_path}'.")
+
 
 # Import grid_reload_jobs_from_ids
 
@@ -125,7 +128,7 @@ if experiment_id == "auto":
 # Get resources  #
 ##################
 
-private_net = en.G5kNetworkConf(type="kavlan", roles=["private"], site=SITE, id="1+")
+private_net = en.G5kNetworkConf(type="kavlan-local", site=SITE, id="1+")
 
 # nb_hours = 4
 
@@ -176,9 +179,14 @@ for i in range(NB_PAIRS):
     os.system(
         f"scp -o StrictHostKeyChecking=no runAll.sh synced/read_g5k_power.py root@{client_hostname}.{SITE}_g5k:/root/energy-aware-packet-scheduling/")
 
+    os.system(f"scp -o StrictHostKeyChecking=no envs/env_{i}.sh root@{client_hostname}.{SITE}_g5k:/root/.env.sh")
+
 # Keep a list of running commands
 asyncLauncher = AsynchronousLauncher(en)
 running_commands = []
+server_hostnames = []
+client_hostnames = []
+fastclick_conf_opt = ["--enable-vector", "--enable-vector --disable-avx512", "--disable-avx512"]
 for i in range(NB_PAIRS):
     os.system(f"scp -o StrictHostKeyChecking=no {npf_files[i]} root@{client_hostname}.{SITE}_g5k:/root/npf_script.npf")
     # Up the interface
@@ -198,6 +206,8 @@ for i in range(NB_PAIRS):
     # Retrieve hostnames
     client_hostname = list(roles[f"client{i}"].data)[0].address
     server_hostname = list(roles[f"server{i}"].data)[0].address
+    server_hostnames.append(server_hostname)
+    client_hostnames.append(client_hostname)
     # Get MAC addresses
     client_mac = en.run_command("ip link show eno2 | awk '/ether/ {print $2}'", roles=roles[f"client{i}"])[0].payload[
         "stdout"]
@@ -273,8 +283,6 @@ for i in range(NB_PAIRS):
     print(client_hostname)
     print(server_hostname)
 
-    os.system(f"scp -o StrictHostKeyChecking=no envs/env_{i}.sh root@{client_hostname}.{SITE}_g5k:/root/.env.sh")
-
     os.system(
         f"rsync -avz --exclude '.git/' --exclude '.idea/'  -e 'ssh -o StrictHostKeyChecking=no' /home/emile/cours/UCLouvain/TFE/fastclick root@{client_hostname}.{SITE}_g5k:/root/")
 
@@ -282,38 +290,118 @@ for i in range(NB_PAIRS):
         f"scp -o StrictHostKeyChecking=no pktgen/cfg.lua root@{server_hostname}.{SITE}_g5k:/root/cfg.lua")
 
     os.system(
+        f"scp -o StrictHostKeyChecking=no synced/test_dpdk.npf root@{server_hostname}.{SITE}_g5k:/root/npf_script.npf"
+    )
+
+    os.system(
         f"scp -o StrictHostKeyChecking=no /home/emile/cours/UCLouvain/TFE/TFE-utils/enoslib/dpdk-23.03.tar.xz root@{server_hostname}.{SITE}_g5k:/root/"
     )
 
-    # unpack dpdk
-    running_commands.append(
-        asyncLauncher.run_command(
-            f'tar -xf dpdk-23.03.tar.xz && rm dpdk-23.03.tar.xz',
-            roles=roles[f"server{i}"], run_locally=False
-        )
+    os.system(
+        f"scp -o StrictHostKeyChecking=no /home/emile/cours/UCLouvain/TFE/TFE-utils/enoslib/fastclick.sh root@{client_hostname}.{SITE}_g5k:/root/fastclick.sh"
     )
 
+    # unpack dpdk
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         f'tar -xf dpdk-23.03.tar.xz && rm dpdk-23.03.tar.xz',
+    #         roles=roles[f"server{i}"], run_locally=False
+    #     )
+    # )
+
+    # HERE /!\
     running_commands.append(
         asyncLauncher.run_command(
-            f'apt install valgrind && /root/fastclick/configure CFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" CXXFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" --enable-dpdk --enable-bound-port-transfer --enable-flow --disable-task-stats --disable-cpu-load --enable-dpdk-packet --disable-clone --disable-dpdk-softqueue --disable-analysis --disable-app --disable-aqm --disable-simple --disable-tcpudp --disable-test --disable-threads --disable-flow --enable-vector --enable-dpdk-pool && make -j 16 -C /root/fastclick/ install && /usr/local/bin/click --dpdk -c 0xf -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl.click',
+            f'apt install -y valgrind && /root/fastclick/configure CFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" CXXFLAGS="-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2 -mavx -mavx2 -mavx512f -mavx512dq -mavx512cd -mavx512bw -mavx512vl -mfma -mbmi -mbmi2" --enable-dpdk --enable-bound-port-transfer --enable-flow --disable-task-stats --disable-cpu-load --enable-dpdk-packet --disable-clone --disable-dpdk-softqueue --disable-analysis --disable-app --disable-aqm --disable-simple --disable-tcpudp --disable-test --disable-threads --disable-flow --enable-dpdk-pool {fastclick_conf_opt[i]} && make -j 16 -C /root/fastclick install && tmux new -d -s fc "/usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl.click; exec bash"',
             roles=roles[f"client{i}"], run_locally=False)
     )
 
-    time.sleep(30)
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         'apt install -y  liblua5.4-dev lua5.4 && cd /root/dpdk-23.03 && meson setup build -Dprefix=$(pwd)/install && export DPDK_PATH=$(pwd)/install && cd build && ninja && ninja install && export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/ && export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH && cd /root/ && rm -rf Pktgen-DPDK && git clone https://github.com/Emilevillette/Pktgen-DPDK.git && cd Pktgen-DPDK && git checkout working_lua && make buildlua',
+    #         roles=roles[f"server{i}"], run_locally=False
+    #     )
+    # )
 
-    running_commands.append(
-        asyncLauncher.run_command(
-            'apt install -y  liblua5.4-dev lua5.4 && cd /root/dpdk-23.03 && meson setup build -Dprefix=$(pwd)/install && export DPDK_PATH=$(pwd)/install && cd build && ninja && ninja install && export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/ && export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH && cd /root/ && rm -rf Pktgen-DPDK && git clone https://github.com/Emilevillette/Pktgen-DPDK.git && cd Pktgen-DPDK && git checkout working_lua && make buildlua && /root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m "[1:2].0" -f /root/cfg.lua',
-            roles=roles[f"server{i}"], run_locally=False
+    # launch fastclick
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         f"/usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl.click",
+    #         roles=roles[f"client{i}"], run_locally=False
+    #     )
+    # )
+
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         "/root/fastclick.sh &; echo $! > /root/fastclick.pid",
+    #         roles=roles[f"client{i}"], run_locally=False
+    #     )
+    # )
+
+    # for j in range(len(running_commands)):
+    #     running_commands[j].wait(polling_interval=15)
+    #     print(f"LAUNCHING PKTGEN ON SERVER {i}")
+
+    # time.sleep(15)
+    # print(f"STARTING PKTGEN ON SERVER {i}")
+
+    # Launch DPDK-pktgen
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         f'/root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m "[1:2].0" -f /root/cfg.lua',
+    #         roles=roles[f"server{i}"], run_locally=False
+    #     )
+    # )
+
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         f'/root/npf/npf-run.py --test /root/npf_script.npf --single-output /root/results.csv',
+    #         roles=roles[f"server{i}"], run_locally=False
+    #     )
+    # )
+
+    # running_commands.append(
+    #     asyncLauncher.run_command(
+    #         'tar -xf dpdk-23.03.tar.xz && rm dpdk-23.03.tar.xz && chmod +x /root/npf_script.npf && apt install -y  liblua5.4-dev lua5.4 && cd /root/dpdk-23.03 && meson setup build -Dprefix=$(pwd)/install && export DPDK_PATH=$(pwd)/install && cd build && ninja && ninja install && export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/ && export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH && cd /root/ && rm -rf Pktgen-DPDK && git clone https://github.com/Emilevillette/Pktgen-DPDK.git && cd Pktgen-DPDK && git checkout working_lua && make buildlua && cd && /root/npf/npf-run.py --test /root/npf_script.npf --single-output /root/results.csv',
+    #         roles=roles[f"server{i}"], run_locally=False
+    #     )
+    # )
+
+    # Wait for the command to finish
+    # running_commands[-1].wait(polling_interval=15)
+    # print(f"PKTGEN ON SERVER {i} FINISHED, KILLING FASTCLICK")
+
+for i in range(len(running_commands)):
+    running_commands[i].wait(polling_interval=15)
+    print(f"FASTCLICK INSTALL FINISHED ON CLIENT {client_hostnames[i]}")
+
+# Launch pktgen
+run_npf = False
+for i in range(NB_PAIRS):
+    if run_npf:
+        running_commands.append(
+            asyncLauncher.run_command(
+                "tar -xf dpdk-23.03.tar.xz && rm dpdk-23.03.tar.xz && chmod +x /root/npf_script.npf && apt install -y  liblua5.4-dev lua5.4 && cd /root/dpdk-23.03 && meson setup build -Dprefix=$(pwd)/install && export DPDK_PATH=$(pwd)/install && cd build && ninja && ninja install && export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/ && export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH && cd /root/ && rm -rf Pktgen-DPDK && git clone https://github.com/Emilevillette/Pktgen-DPDK.git && cd Pktgen-DPDK && git checkout working_lua && make buildlua && cd && /root/npf/npf-run.py --test /root/npf_script.npf --single-output /root/results.csv",
+                roles=roles[f"server{i}"], run_locally=False
+            )
         )
-    )
-
-
 ####################
 # Wait for results #
 ####################
+
+
+for i in range(NB_PAIRS):
+    print(f"CLIENT {i} : {client_hostnames[i]}")
+    print(f"SERVER {i} : {server_hostnames[i]}")
 
 # Wait for all the commands to finish
 for i in range(len(running_commands)):
     running_commands[i].wait(polling_interval=15)
     print(f"Client {i} finished")
+
+subname = ["VECTOR_AVX", "VECTOR_NOAVX", "LL_NOAVX"]
+for i in range(NB_PAIRS):
+    # get results.csv from server
+    server_hostname = server_hostnames[i]
+    os.system(
+        f"scp -o StrictHostKeyChecking=no root@{server_hostname}.{SITE}_g5k:/root/results.csv ./results/results_{datetime.now().strftime('%Y%m%d-%H%M%S')}_{subname[i]}.csv")
