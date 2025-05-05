@@ -1,14 +1,16 @@
 %config
-n_runs=5
+n_runs=8
 
 %variables
 PACKET_SIZE={64, 128, 256, 512, 1024, 1518}
-PACKET_RATE={1, 2, 4, 8, 16, 32}
-
-%init
-echo PACKET_SIZE,PACKET_RATE,RESULT-RX-RATE-MBPS,RESULT-LOSE-RATE,RESULT-AVG-LAT,RESULT-RX-GOODPUT-MBPS-PKTGEN,RESULT-RX-GOODPUT-GBPS-PKTGEN > result.csv
+PACKET_RATE={1, 10, 25, 50, 75, 100}
 
 %script@client delay=5
-rm result.txt
+export DPDK_PATH=/root/dpdk-23.03/install
+export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/
+export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH
 sed -i -e 's/^RATE = .*/RATE = ${PACKET_RATE}/' -e 's/^PKT_SIZE = .*/PKT_SIZE = ${PACKET_SIZE}/' /root/cfg.lua
 script -q -c "/root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m \"[1:2].0\" -f /root/cfg.lua" /dev/null
+
+%script@server
+/usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl.click
