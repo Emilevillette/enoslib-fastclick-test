@@ -8,26 +8,30 @@ import matplotlib.gridspec as gridspec
 import sys
 import os
 
-SAVE_TO_PNG = True
+SAVE_TO_PNG = False
 
 
-# COLUMN HEADER FORMAT : index,build,test_index,PACKET_SIZE,PACKET_RATE,RX-RATE-PPS,RX-RATE-MBPS,LOSE-RATE,AVG-LAT,RX-GOODPUT-MBPS-PKTGEN,RX-GOODPUT-GBPS-PKTGEN,run_index
+# COLUMN HEADER FORMAT : index,build,test_index,PACKET_SIZE,PACKET_RATE,RX-RATE-PPS,RX-RATE-GBPS,LOSE-RATE,AVG-LAT,RX-GOODPUT-MBPS-PKTGEN,RX-GOODPUT-GBPS-PKTGEN,run_index
+
+FONT_SIZE = 22
+BORDER_WIDTH = 3
 
 def set_plot_style():
     """Set consistent style for all plots"""
     plt.style.use('seaborn-v0_8-whitegrid')
-    mpl.rcParams['axes.labelsize'] = 12
-    mpl.rcParams['axes.titlesize'] = 14
-    mpl.rcParams['xtick.labelsize'] = 10
-    mpl.rcParams['ytick.labelsize'] = 10
-    mpl.rcParams['legend.fontsize'] = 10
-    mpl.rcParams['figure.titlesize'] = 16
-    mpl.rcParams['lines.linewidth'] = 2
-    mpl.rcParams['lines.markersize'] = 8
+    mpl.rcParams['axes.labelsize'] = FONT_SIZE
+    mpl.rcParams['axes.titlesize'] = FONT_SIZE + 2
+    mpl.rcParams['xtick.labelsize'] = FONT_SIZE
+    mpl.rcParams['ytick.labelsize'] = FONT_SIZE
+    mpl.rcParams['legend.fontsize'] = FONT_SIZE
+    mpl.rcParams['figure.titlesize'] = FONT_SIZE
+    mpl.rcParams['lines.linewidth'] = 3
+    mpl.rcParams['lines.markersize'] = 12
     mpl.rcParams['axes.grid'] = True
     mpl.rcParams['grid.linestyle'] = '--'
     mpl.rcParams['grid.alpha'] = 0.7
-
+    # change the font to a more readable one
+    mpl.rcParams['font.family'] = 'sans-serif'
 
 def open_file(filename):
     """
@@ -60,12 +64,13 @@ def plot_data(df, x_col, y_col, group_col, x_legend, y_legend, output_file, file
     # Apply consistent styling
     set_plot_style()
 
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 8))
     markers = ['o', 's', 'D', '^', '+', 'x', 'p', '*', 'h', '<', '>', 'H', 'v', 'd']
     colors = plt.cm.tab10.colors
 
     ax = plt.gca()
-    ax.tick_params(direction='in', which='both', top=True, right=True)
+    ax.tick_params(axis='x', which='both', direction='in', length=5, width=BORDER_WIDTH, top=True, bottom=True)
+    ax.tick_params(axis='y', which='both', direction='in', length=5, width=BORDER_WIDTH, left=True, right=True)
 
     # Get unique x values for tick positioning
     unique_x_vals = sorted(df[x_col].unique())
@@ -101,8 +106,8 @@ def plot_data(df, x_col, y_col, group_col, x_legend, y_legend, output_file, file
                      capsize=5,
                      elinewidth=1.5)
 
-    plt.title(f"{y_col} vs {x_col}")
-    plt.legend(title=group_col, loc='best', framealpha=0.9)
+    # plt.title(f"{y_col} vs {x_col}")
+    plt.legend(title=group_col, loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=3, fancybox=True, title_fontsize=FONT_SIZE)
     plt.ylim(0, None)  # Set y-axis limit to start from 0
     plt.xlabel(x_legend, fontweight='bold')
     plt.ylabel(y_legend, fontweight='bold')
@@ -112,7 +117,8 @@ def plot_data(df, x_col, y_col, group_col, x_legend, y_legend, output_file, file
 
     # Add a thin border
     for spine in ax.spines.values():
-        spine.set_linewidth(0.5)
+        spine.set_color('black')
+        spine.set_linewidth(BORDER_WIDTH)
 
     plt.tight_layout()
     plt.savefig(f"output/{filename}/{output_file}.pdf", bbox_inches='tight', dpi=300)
@@ -140,7 +146,7 @@ def plot_bar_comparison(df, x_col, y_col, group_col, x_legend, y_legend, output_
     set_plot_style()
 
     # Create figure with appropriate size
-    plt.figure(figsize=(12, 7))
+    plt.figure(figsize=(12, 8))
 
     # Get unique x values and group values
     x_values = sorted(df[x_col].unique())
@@ -157,10 +163,13 @@ def plot_bar_comparison(df, x_col, y_col, group_col, x_legend, y_legend, output_
     index = np.arange(len(x_values))
 
     # Define hatches for print-friendly distinction
-    hatches = ['///', '\\\\\\', 'xxx', '+', '*', 'o', 'O', '.', '|', '-']
+    hatches = ['/', '\\', 'x', '+', '*', 'o', 'O', '.', '|', '-']
 
     # Create the grouped bars
     ax = plt.gca()
+    # Tweak tick appearance
+    ax.tick_params(axis='x', which='both', direction='in', length=5, width=BORDER_WIDTH, top=True, bottom=False)
+    ax.tick_params(axis='y', which='both', direction='in', length=5, width=BORDER_WIDTH, left=True, right=True)
     for i, group in enumerate(groups):
         # Filter data for this group
         group_data = df[df[group_col] == group]
@@ -197,20 +206,20 @@ def plot_bar_comparison(df, x_col, y_col, group_col, x_legend, y_legend, output_
                       hatch=hatches[i % len(hatches)])  # Add hatch pattern
 
         # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            if height > 0:  # Only add text if bar has height
-                # Format value based on magnitude
-                if height >= 1_000_000:
-                    value_text = f'{height / 1_000_000:.2f}M'
-                elif height >= 1000:
-                    value_text = f'{height / 1000:.2f}K'
-                else:
-                    value_text = f'{height:.2f}'
-
-                ax.text(bar.get_x() + bar.get_width() / 2., height + ordered_stats['std'].max() * 0.2,
-                        value_text, ha='center', va='bottom', rotation=45,
-                        fontsize=8, fontweight='bold')
+        # for bar in bars:
+        #     height = bar.get_height()
+        #     if height > 0:  # Only add text if bar has height
+        #         # Format value based on magnitude
+        #         if height >= 1_000_000:
+        #             value_text = f'{height / 1_000_000:.2f}M'
+        #         elif height >= 1000:
+        #             value_text = f'{height / 1000:.2f}K'
+        #         else:
+        #             value_text = f'{height:.2f}'
+        #
+        #         ax.text(bar.get_x() + bar.get_width() / 2., height + ordered_stats['std'].max() * 0.2,
+        #                 value_text, ha='center', va='bottom', rotation=45,
+        #                 fontsize=8, fontweight='bold')
 
     # Set labels and title
     plt.xlabel(x_legend, fontweight='bold')
@@ -220,8 +229,14 @@ def plot_bar_comparison(df, x_col, y_col, group_col, x_legend, y_legend, output_
     # Set x-ticks at the center of each group
     plt.xticks(index, x_values)
 
+    for tick in plt.gca().get_xticklabels():
+        tick.set_visible(True)
+        tick.set_color('black')  # Or any visible color
+        tick.set_alpha(1.0)
+
+
     # Add a legend
-    plt.legend(title=group_col, loc='upper center', bbox_to_anchor=(0.5, 1.1), ncol=n_groups, fancybox=True)
+    plt.legend(title=group_col, loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=n_groups, fancybox=True, title_fontsize=FONT_SIZE)
 
     # Set y-axis to start at 0 and use reasonable number of ticks
     ax.yaxis.set_major_locator(MaxNLocator(nbins=8))
@@ -229,7 +244,8 @@ def plot_bar_comparison(df, x_col, y_col, group_col, x_legend, y_legend, output_
 
     # Add a thin border
     for spine in ax.spines.values():
-        spine.set_linewidth(0.5)
+        spine.set_color('black')
+        spine.set_linewidth(BORDER_WIDTH)
 
     # Adjust layout and save
     plt.tight_layout()
@@ -457,7 +473,7 @@ def plot_aggregate_grid(df, metric_cols, group_col, output_file, filename):
         # Set x-axis to start at 0
         ax.set_xlim(0, None)
 
-    plt.suptitle(f'Aggregate Performance Metrics by {group_col}', fontsize=16, fontweight='bold')
+    plt.suptitle(f'Aggregate Performance Metrics by {group_col}', fontsize=FONT_SIZE, fontweight='bold')
     plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave room for suptitle
     plt.savefig(f"output/{filename}/aggregate_grid_{output_file}.pdf", bbox_inches='tight', dpi=300)
     if SAVE_TO_PNG:
@@ -536,10 +552,14 @@ if __name__ == "__main__":
     combined_df.fillna(0, inplace=True)
 
     combined_df["PACKET_RATE_MBPS"] = combined_df["PACKET_RATE"] * 25000 / 100
+    combined_df["PACKET_RATE_GBPS"] = combined_df["PACKET_RATE_MBPS"] / 1000
+    combined_df["RX-RATE-GBPS"] = combined_df["RX-RATE-MBPS"] / 1000
     # filter out lines where LOSE-RATE is > 0.5
     print("NOT Filtering out lines where LOSE-RATE is > 0.1")
     print("PREVIOUS N° OF LINES: ", len(combined_df))
     # combined_df = combined_df[combined_df["LOSE-RATE"] <= 0.5]
+    # combined_df = combined_df[combined_df["AVG-LAT"] <= 1000]
+    # combined_df = combined_df[combined_df["AVG-LAT"] >= 1]
     print("AFTER N° OF LINES: ", len(combined_df))
 
     # Create output directory
@@ -548,7 +568,7 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     # Define metrics for plotting
-    metrics = ['RX-RATE-PPS', 'RX-RATE-MBPS', 'LOSE-RATE']
+    metrics = ['RX-RATE-PPS', 'RX-RATE-GBPS', 'LOSE-RATE', 'AVG-LAT']
 
     # Create aggregate plots for each metric
     for metric in metrics:
@@ -560,15 +580,15 @@ if __name__ == "__main__":
     # Create heatmaps for each implementation and metric
     for impl in combined_df['Implementation'].unique():
         for metric in metrics:
-            plot_heatmap(combined_df, 'PACKET_SIZE', 'PACKET_RATE_MBPS', metric,
-                         'Implementation', impl, 'Packet Size (bytes)', 'Packet Rate (mbps)',
+            plot_heatmap(combined_df, 'PACKET_SIZE', 'PACKET_RATE_GBPS', metric,
+                         'Implementation', impl, 'Packet Size (bytes)', 'Packet Rate (gbps)',
                          metric.lower(), base_filename)
 
     # Create plot for each packet rate, comparing implementations
-    packet_rates = combined_df['PACKET_RATE_MBPS'].unique()
+    packet_rates = combined_df['PACKET_RATE_GBPS'].unique()
 
     for rate in packet_rates:
-        rate_df = combined_df[combined_df['PACKET_RATE_MBPS'] == rate]
+        rate_df = combined_df[combined_df['PACKET_RATE_GBPS'] == rate]
 
         # Plot RX-RATE-PPS vs PACKET_SIZE for all implementations at this rate
         plot_data(rate_df, "PACKET_SIZE", "RX-RATE-PPS", "Implementation",
@@ -580,15 +600,15 @@ if __name__ == "__main__":
                             "Packet Size (bytes)", "RX Rate (PPS)",
                             f"rx_rate_pps_rate_{rate}", base_filename)
 
-        # Plot RX-RATE-MBPS vs PACKET_SIZE
-        plot_data(rate_df, "PACKET_SIZE", "RX-RATE-MBPS", "Implementation",
-                  "Packet Size (bytes)", "RX Rate (Mbps)",
-                  f"rx_rate_mbps_rate_{rate}", base_filename)
+        # Plot RX-RATE-GBPS vs PACKET_SIZE
+        plot_data(rate_df, "PACKET_SIZE", "RX-RATE-GBPS", "Implementation",
+                  "Packet Size (bytes)", "RX Rate (Gbps)",
+                  f"rx_rate_gbps_rate_{rate}", base_filename)
 
         # Add bar plot version
-        plot_bar_comparison(rate_df, "PACKET_SIZE", "RX-RATE-MBPS", "Implementation",
-                            "Packet Size (bytes)", "RX Rate (Mbps)",
-                            f"rx_rate_mbps_rate_{rate}", base_filename)
+        plot_bar_comparison(rate_df, "PACKET_SIZE", "RX-RATE-GBPS", "Implementation",
+                            "Packet Size (bytes)", "RX Rate (Gbps)",
+                            f"rx_rate_gbps_rate_{rate}", base_filename)
 
         # Plot LOSE-RATE vs PACKET_SIZE
         plot_data(rate_df, "PACKET_SIZE", "LOSE-RATE", "Implementation",
@@ -600,40 +620,58 @@ if __name__ == "__main__":
                             "Packet Size (bytes)", "Loss Rate",
                             f"loss_rate_rate_{rate}", base_filename)
 
+        # Plot AVG-LAT vs PACKET_SIZE
+        plot_data(rate_df, "PACKET_SIZE", "AVG-LAT", "Implementation",
+                  "Packet Size (bytes)", "Average Latency (us)",
+                  f"avg_lat_rate_{rate}", base_filename)
+
+        # Add bar plot version
+        plot_bar_comparison(rate_df, "PACKET_SIZE", "AVG-LAT", "Implementation",
+                            "Packet Size (bytes)", "Average Latency (us)",
+                            f"avg_lat_rate_{rate}", base_filename)
+
     # Create a direct comparison plot for each packet size, showing performance across implementations
     packet_sizes = combined_df['PACKET_SIZE'].unique()
     for size in packet_sizes:
         size_df = combined_df[combined_df['PACKET_SIZE'] == size]
 
         # Create plots comparing implementations at this packet size
-        plot_data(size_df, "PACKET_RATE_MBPS", "RX-RATE-PPS", "Implementation",
-                  "Packet Rate (Mbps)", "RX Rate (PPS)",
+        plot_data(size_df, "PACKET_RATE_GBPS", "RX-RATE-PPS", "Implementation",
+                  "Packet Rate (Gbps)", "RX Rate (PPS)",
                   f"impl_comparison_pps_size_{size}", base_filename)
 
-        plot_data(size_df, "PACKET_RATE_MBPS", "RX-RATE-MBPS", "Implementation",
-                  "Packet Rate (Mbps)", "RX Rate (Mbps)",
-                  f"impl_comparison_mbps_size_{size}", base_filename)
+        plot_data(size_df, "PACKET_RATE_GBPS", "RX-RATE-GBPS", "Implementation",
+                  "Packet Rate (Gbps)", "RX Rate (Gbps)",
+                  f"impl_comparison_gbps_size_{size}", base_filename)
 
-        plot_data(size_df, "PACKET_RATE_MBPS", "LOSE-RATE", "Implementation",
-                  "Packet Rate (Mbps)", "Loss Rate",
+        plot_data(size_df, "PACKET_RATE_GBPS", "LOSE-RATE", "Implementation",
+                  "Packet Rate (Gbps)", "Loss Rate",
                   f"impl_comparison_loss_size_{size}", base_filename)
 
+        plot_data(size_df, "PACKET_RATE_GBPS", "AVG-LAT", "Implementation",
+                  "Packet Rate (Gbps)", "Average Latency (us)",
+                  f"impl_comparison_avg_lat_size_{size}", base_filename)
+
         # Bar plot versions
-        plot_bar_comparison(size_df, "PACKET_RATE_MBPS", "RX-RATE-PPS", "Implementation",
-                            "Packet Rate (Mbps)", "RX Rate (PPS)",
+        plot_bar_comparison(size_df, "PACKET_RATE_GBPS", "RX-RATE-PPS", "Implementation",
+                            "Packet Rate (Gbps)", "RX Rate (PPS)",
                             f"impl_comparison_pps_size_{size}", base_filename)
 
-        plot_bar_comparison(size_df, "PACKET_RATE_MBPS", "RX-RATE-MBPS", "Implementation",
-                            "Packet Rate (Mbps)", "RX Rate (Mbps)",
-                            f"impl_comparison_mbps_size_{size}", base_filename)
+        plot_bar_comparison(size_df, "PACKET_RATE_GBPS", "RX-RATE-GBPS", "Implementation",
+                            "Packet Rate (Gbps)", "RX Rate (Gbps)",
+                            f"impl_comparison_gbps_size_{size}", base_filename)
 
-        plot_bar_comparison(size_df, "PACKET_RATE_MBPS", "LOSE-RATE", "Implementation",
-                            "Packet Rate (Mbps)", "Loss Rate",
+        plot_bar_comparison(size_df, "PACKET_RATE_GBPS", "LOSE-RATE", "Implementation",
+                            "Packet Rate (Gbps)", "Loss Rate",
                             f"impl_comparison_loss_size_{size}", base_filename)
 
-    plot_bar_comparison(combined_df, "PACKET_SIZE", "RX-RATE-MBPS", "Implementation",
-                        "Packet Size (bytes)", "RX Rate (Mbps)",
-                        f"rx_rate_mbps_all", base_filename)
+        plot_bar_comparison(size_df, "PACKET_RATE_GBPS", "AVG-LAT", "Implementation",
+                            "Packet Rate (Gbps)", "Average Latency (us)",
+                            f"impl_comparison_avg_lat_size_{size}", base_filename)
+
+    plot_bar_comparison(combined_df, "PACKET_SIZE", "RX-RATE-GBPS", "Implementation",
+                        "Packet Size (bytes)", "RX Rate (Gbps)",
+                        f"rx_rate_gbps_all", base_filename)
 
     plot_bar_comparison(combined_df, "PACKET_SIZE", "RX-RATE-PPS", "Implementation",
                         "Packet Size (bytes)", "RX Rate (PPS)",
@@ -643,25 +681,25 @@ if __name__ == "__main__":
                         "Packet Size (bytes)", "Loss Rate",
                         f"loss_rate_all", base_filename)
 
-    plot_bar_comparison(combined_df, "PACKET_RATE_MBPS", "RX-RATE-MBPS", "Implementation",
-                        "Packet Rate (Mbps)", "RX Rate (Mbps)",
-                        f"rx_rate_mbps_all_rate", base_filename)
+    plot_bar_comparison(combined_df, "PACKET_RATE_GBPS", "RX-RATE-GBPS", "Implementation",
+                        "Packet Rate (Gbps)", "RX Rate (Gbps)",
+                        f"rx_rate_gbps_all_rate", base_filename)
 
     # Also create plots comparing all packet rates for each implementation
     for impl in combined_df['Implementation'].unique():
         impl_df = combined_df[combined_df['Implementation'] == impl]
 
         # Plot RX-RATE-PPS vs PACKET_SIZE
-        plot_data(impl_df, "PACKET_SIZE", "RX-RATE-PPS", "PACKET_RATE_MBPS",
+        plot_data(impl_df, "PACKET_SIZE", "RX-RATE-PPS", "PACKET_RATE_GBPS",
                   "Packet Size (bytes)", "RX Rate (PPS)",
                   f"rx_rate_pps_{impl}", base_filename)
 
-        # Plot RX-RATE-MBPS vs PACKET_SIZE
-        plot_data(impl_df, "PACKET_SIZE", "RX-RATE-MBPS", "PACKET_RATE_MBPS",
-                  "Packet Size (bytes)", "RX Rate (Mbps)",
-                  f"rx_rate_mbps_{impl}", base_filename)
+        # Plot RX-RATE-GBPS vs PACKET_SIZE
+        plot_data(impl_df, "PACKET_SIZE", "RX-RATE-GBPS", "PACKET_RATE_GBPS",
+                  "Packet Size (bytes)", "RX Rate (Gbps)",
+                  f"rx_rate_gbps_{impl}", base_filename)
 
         # Plot LOSE-RATE vs PACKET_SIZE
-        plot_data(impl_df, "PACKET_SIZE", "LOSE-RATE", "PACKET_RATE_MBPS",
+        plot_data(impl_df, "PACKET_SIZE", "LOSE-RATE", "PACKET_RATE_GBPS",
                   "Packet Size (bytes)", "Loss Rate",
                   f"loss_rate_{impl}", base_filename)

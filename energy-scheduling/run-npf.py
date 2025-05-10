@@ -336,6 +336,41 @@ for i in range(len(running_commands)):
     running_commands[i].wait(polling_interval=15)
     print(f"Client {i} finished")
 
+npf_name = input("Enter NPF name: ")
+# time is in the format YYYYMMDD_HHMMSS
+# Get the current time
+now = datetime.now()
+# Format the time as a string
+current_time = now.strftime("%Y%m%d_%H%M%S")
+current_time_no_suffix = current_time
+
+npf_name_2 = input("Enter NPF name 2 (with suffix): ")
+if npf_name_2 == "":
+    npf_name_2 = npf_name
+
+suffix = input("Suffix :")
+if suffix != "":
+    current_time = f"{suffix}_{current_time}"
+
+
 for i in range(NB_PAIRS):
     print(f"CLIENT {i} : {client_hostnames[i]}")
     print(f"SERVER {i} : {server_hostnames[i]}")
+
+vrsns = ["VECTOR_AVX", "VECTOR_NOAVX", "LL_NOAVX"]
+
+with open("npf_script.bash", "w") as f:
+    curr_string = ""
+    for i in range(NB_PAIRS):
+        curr_string = f"~/.local/bin/npf-run --force-retest --preserve-temporaries --no-transform --no-graph --test ~/experiments/{npf_name}.npf --single-output ~/experiments/results/results_classified_{current_time_no_suffix}_{vrsns[i]}.csv --cluster client=root@{server_hostnames[i]} server=root@{client_hostnames[i]}"
+        print(curr_string)
+        f.write(curr_string + "\n")
+
+    for i in range(NB_PAIRS):
+        curr_string = f"~/.local/bin/npf-run --force-retest --preserve-temporaries --no-transform --no-graph --test ~/experiments/{npf_name_2}.npf --single-output ~/experiments/results/results_classified_{current_time}_{vrsns[i]}.csv --cluster client=root@{server_hostnames[i]} server=root@{client_hostnames[i]}"
+        print(curr_string)
+        f.write(curr_string + "\n")
+
+
+os.system("scp -o StrictHostKeyChecking=no npf_script.bash nancy.g5k:~/experiments/npf_script.bash")
+
