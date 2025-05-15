@@ -13,4 +13,4 @@ sed -i -e 's/^RATE = .*/RATE = ${PACKET_RATE}/' -e 's/^PKT_SIZE = .*/PKT_SIZE = 
 script -q -c "/root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m \"[1:2].0\" -f /root/cfg.lua" /dev/null
 
 %script@server
-/usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl-classified.click
+/usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/baseline.click

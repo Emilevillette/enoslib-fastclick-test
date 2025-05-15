@@ -1,0 +1,19 @@
+%config
+n_runs=1
+
+%variables
+PACKET_SIZE={64}
+PACKET_RATE={100}
+i={1,2,3,4,5}
+
+%script@client delay=5
+export DPDK_PATH=/root/dpdk-23.03/install
+export PKG_CONFIG_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/pkgconfig/
+export LD_LIBRARY_PATH=${DPDK_PATH}/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH
+sed -i -e 's/^RATE = .*/RATE = ${PACKET_RATE}/' -e 's/^PKT_SIZE = .*/PKT_SIZE = ${PACKET_SIZE}/' /root/cfg.lua
+script -q -c "/root/Pktgen-DPDK/usr/local/bin/pktgen -l 0-3 -n 4 -a 0000:18:00.1 -- -P -m \"[1:2].0\" -f /root/cfg.lua > /dev/null" /dev/null
+sleep 45s
+
+%script@server
+perf stat -e cycles,instructions,cache-references,cache-misses,branch-instructions,branch-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,dTLB-loads,dTLB-load-misses -x "," -o /root/recording_stat${i}.data timeout 25s /usr/local/bin/click --dpdk -c 0x1 -n 4 -a 0000:18:00.1 -- /root/fastclick/conf/ip/decipttl-classified.click
+sleep 15s

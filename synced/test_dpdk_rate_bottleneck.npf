@@ -1,9 +1,9 @@
 %config
-n_runs=6
+n_runs=5
 
 %variables
-PACKET_SIZE={64, 128, 256, 512, 1024, 1518}
-PACKET_RATE={1, 10, 25, 50, 75, 100}
+PACKET_SIZE={64}
+PACKET_RATE={1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 %script@client delay=3 waitfor=ready
 export DPDK_PATH=/root/dpdk-23.03/install
