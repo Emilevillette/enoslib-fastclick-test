@@ -1,0 +1,3050 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="662" onload="init(evt)" viewBox="0 0 1200 662" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="662.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="645" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="645" > </text>
+<g id="frames">
+<g >
+<title>menu_select (8,137,017 samples, 0.01%)</title><rect x="1189.0" y="485" width="0.1" height="15.0" fill="rgb(242,172,41)" rx="2" ry="2" />
+<text  x="1192.04" y="495.5" ></text>
+</g>
+<g >
+<title>atomic_uint64_t::operator++ (482,193,080 samples, 0.53%)</title><rect x="838.1" y="197" width="6.3" height="15.0" fill="rgb(229,111,26)" rx="2" ry="2" />
+<text  x="841.13" y="207.5" ></text>
+</g>
+<g >
+<title>IPAddress* find&lt;IPAddress&gt; (56,878,885 samples, 0.06%)</title><rect x="885.2" y="213" width="0.8" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="888.22" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::end_data (666,536,758 samples, 0.74%)</title><rect x="986.3" y="421" width="8.7" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="989.28" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (284,642,142 samples, 0.32%)</title><rect x="798.1" y="165" width="3.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="801.11" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (58,871,663 samples, 0.07%)</title><rect x="685.5" y="85" width="0.8" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="688.55" y="95.5" ></text>
+</g>
+<g >
+<title>SelectSet::post_select (119,825,340 samples, 0.13%)</title><rect x="278.6" y="485" width="1.5" height="15.0" fill="rgb(217,58,14)" rx="2" ry="2" />
+<text  x="281.55" y="495.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (8,345,787 samples, 0.01%)</title><rect x="147.6" y="341" width="0.1" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="150.58" y="351.5" ></text>
+</g>
+<g >
+<title>Packet::anno_u16 (7,724,189 samples, 0.01%)</title><rect x="709.0" y="133" width="0.1" height="15.0" fill="rgb(238,154,36)" rx="2" ry="2" />
+<text  x="712.01" y="143.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_tailroom (426,313,936 samples, 0.47%)</title><rect x="826.8" y="149" width="5.5" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="829.76" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::set_dst_ip_anno (183,189,457 samples, 0.20%)</title><rect x="787.2" y="197" width="2.4" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="790.21" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (7,719,636 samples, 0.01%)</title><rect x="611.8" y="85" width="0.1" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="614.82" y="95.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (213,110,275 samples, 0.24%)</title><rect x="981.3" y="421" width="2.8" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="984.34" y="431.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (112,079,851 samples, 0.12%)</title><rect x="1160.0" y="469" width="1.5" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="1163.00" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::mb (60,801,328 samples, 0.07%)</title><rect x="805.7" y="133" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="808.73" y="143.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (2,701,101,646 samples, 2.99%)</title><rect x="562.2" y="117" width="35.3" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="565.22" y="127.5" >El..</text>
+</g>
+<g >
+<title>Packet::length (16,391,798 samples, 0.02%)</title><rect x="825.1" y="149" width="0.2" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="828.06" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::end_buffer (1,640,755,611 samples, 1.82%)</title><rect x="810.9" y="165" width="21.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="813.89" y="175.5" >P..</text>
+</g>
+<g >
+<title>Packet::end_buffer (50,185,348 samples, 0.06%)</title><rect x="792.0" y="181" width="0.7" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="795.04" y="191.5" ></text>
+</g>
+<g >
+<title>_dlerror_run (72,780,822 samples, 0.08%)</title><rect x="147.5" y="533" width="0.9" height="15.0" fill="rgb(210,27,6)" rx="2" ry="2" />
+<text  x="150.47" y="543.5" ></text>
+</g>
+<g >
+<title>Packet::push (52,058,008 samples, 0.06%)</title><rect x="611.0" y="117" width="0.7" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="614.04" y="127.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::count (12,544,117 samples, 0.01%)</title><rect x="611.9" y="117" width="0.2" height="15.0" fill="rgb(221,75,17)" rx="2" ry="2" />
+<text  x="614.95" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (33,791,506 samples, 0.04%)</title><rect x="964.4" y="373" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="967.38" y="383.5" ></text>
+</g>
+<g >
+<title>BatchElement::push_batch (29,296,926,719 samples, 32.44%)</title><rect x="557.3" y="357" width="382.8" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="560.27" y="367.5" >BatchElement::push_batch</text>
+</g>
+<g >
+<title>Task::fast_reschedule (109,216,873 samples, 0.12%)</title><rect x="1132.3" y="469" width="1.4" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="1135.31" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::network_header (267,325,526 samples, 0.30%)</title><rect x="733.4" y="165" width="3.5" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="736.43" y="175.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="549" width="0.4" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="1189.47" y="559.5" ></text>
+</g>
+<g >
+<title>Packet::set_mac_header (38,496,860 samples, 0.04%)</title><rect x="1129.5" y="469" width="0.5" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="1132.53" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::data (190,989,906 samples, 0.21%)</title><rect x="978.0" y="421" width="2.4" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="980.95" y="431.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,685,474,558 samples, 11.83%)</title><rect x="10.0" y="581" width="139.7" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="13.02" y="591.5" >[unknown]</text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (101,454,611 samples, 0.11%)</title><rect x="366.2" y="485" width="1.4" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="369.23" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::buffer (36,678,539 samples, 0.04%)</title><rect x="971.0" y="453" width="0.5" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="974.02" y="463.5" ></text>
+</g>
+<g >
+<title>RouterThread::task_end (109,149,871 samples, 0.12%)</title><rect x="425.0" y="485" width="1.4" height="15.0" fill="rgb(214,44,10)" rx="2" ry="2" />
+<text  x="427.95" y="495.5" ></text>
+</g>
+<g >
+<title>RouterThread::stop_flag (224,608,748 samples, 0.25%)</title><rect x="325.0" y="453" width="2.9" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="327.96" y="463.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (8,684,994 samples, 0.01%)</title><rect x="940.4" y="405" width="0.1" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="943.42" y="415.5" ></text>
+</g>
+<g >
+<title>IPAddress::IPAddress (34,746,404 samples, 0.04%)</title><rect x="643.7" y="149" width="0.4" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="646.70" y="159.5" ></text>
+</g>
+<g >
+<title>call_cpuidle (160,030,143 samples, 0.18%)</title><rect x="1186.9" y="501" width="2.1" height="15.0" fill="rgb(245,184,44)" rx="2" ry="2" />
+<text  x="1189.94" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::length (368,505,514 samples, 0.41%)</title><rect x="667.3" y="133" width="4.8" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="670.27" y="143.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (21,182,508 samples, 0.02%)</title><rect x="709.5" y="149" width="0.3" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="712.53" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (102,311,182 samples, 0.11%)</title><rect x="974.9" y="437" width="1.3" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="977.88" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (19,308,708 samples, 0.02%)</title><rect x="745.3" y="181" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="748.28" y="191.5" ></text>
+</g>
+<g >
+<title>RouterThread::driver_lock_tasks (2,468,251,735 samples, 2.73%)</title><rect x="220.4" y="485" width="32.3" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="223.42" y="495.5" >Ro..</text>
+</g>
+<g >
+<title>lspci (9,350,165 samples, 0.01%)</title><rect x="1186.3" y="597" width="0.1" height="15.0" fill="rgb(231,122,29)" rx="2" ry="2" />
+<text  x="1189.26" y="607.5" ></text>
+</g>
+<g >
+<title>Packet::set_packet_type_anno (172,688,791 samples, 0.19%)</title><rect x="1005.2" y="453" width="2.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1008.19" y="463.5" ></text>
+</g>
+<g >
+<title>Task::scheduled (673,728,380 samples, 0.75%)</title><rect x="1135.9" y="485" width="8.8" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="1138.93" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (23,148,109 samples, 0.03%)</title><rect x="789.3" y="181" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="792.30" y="191.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::count (34,739,765 samples, 0.04%)</title><rect x="965.4" y="405" width="0.4" height="15.0" fill="rgb(221,75,17)" rx="2" ry="2" />
+<text  x="968.39" y="415.5" ></text>
+</g>
+<g >
+<title>IPAddress::addr (28,939,762 samples, 0.03%)</title><rect x="673.6" y="117" width="0.4" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="676.64" y="127.5" ></text>
+</g>
+<g >
+<title>cpuidle_select (8,583,780 samples, 0.01%)</title><rect x="1189.0" y="501" width="0.1" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="1192.04" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::mb (61,756,358 samples, 0.07%)</title><rect x="620.8" y="69" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="623.82" y="79.5" ></text>
+</g>
+<g >
+<title>per_thread&lt;QueueDevice::ThreadState&gt;::get_value_for_thread (307,517,405 samples, 0.34%)</title><rect x="1018.8" y="421" width="4.1" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1021.85" y="431.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thread_begin (736,367,304 samples, 0.82%)</title><rect x="1013.2" y="437" width="9.7" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="1016.24" y="447.5" ></text>
+</g>
+<g >
+<title>click_current_cpu_id (8,626,161 samples, 0.01%)</title><rect x="579.7" y="53" width="0.1" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="582.71" y="63.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (43,331,696 samples, 0.05%)</title><rect x="626.1" y="85" width="0.6" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="629.13" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (214,163,713 samples, 0.24%)</title><rect x="1002.4" y="453" width="2.8" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="1005.39" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (75,276,772 samples, 0.08%)</title><rect x="735.7" y="133" width="1.0" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="738.67" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header (254,776,059 samples, 0.28%)</title><rect x="683.3" y="117" width="3.4" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="686.34" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::udp_header (519,720,114 samples, 0.58%)</title><rect x="696.8" y="117" width="6.8" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="699.79" y="127.5" ></text>
+</g>
+<g >
+<title>x86_64_start_reservations (37,917,886 samples, 0.04%)</title><rect x="1189.4" y="549" width="0.5" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1192.42" y="559.5" ></text>
+</g>
+<g >
+<title>Packet::udp_header (24,055,437 samples, 0.03%)</title><rect x="686.7" y="133" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="689.67" y="143.5" ></text>
+</g>
+<g >
+<title>ext4_file_write_iter (18,818,961 samples, 0.02%)</title><rect x="1186.6" y="277" width="0.2" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1189.60" y="287.5" ></text>
+</g>
+<g >
+<title>Packet::mb (68,379,258 samples, 0.08%)</title><rect x="980.4" y="421" width="0.9" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="983.45" y="431.5" ></text>
+</g>
+<g >
+<title>QueueDevice::add_count (19,277,251 samples, 0.02%)</title><rect x="1008.3" y="453" width="0.2" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="1011.26" y="463.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (43,519,813 samples, 0.05%)</title><rect x="294.2" y="453" width="0.6" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="297.21" y="463.5" ></text>
+</g>
+<g >
+<title>run_builtin (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="517" width="0.4" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="1189.47" y="527.5" ></text>
+</g>
+<g >
+<title>Packet::shared (45,308,835 samples, 0.05%)</title><rect x="635.5" y="101" width="0.6" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="638.53" y="111.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (349,764,348 samples, 0.39%)</title><rect x="316.1" y="421" width="4.6" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="319.09" y="431.5" ></text>
+</g>
+<g >
+<title>QueueDevice::unlock (59,794,034 samples, 0.07%)</title><rect x="580.2" y="85" width="0.8" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="583.20" y="95.5" ></text>
+</g>
+<g >
+<title>RouterThread::task_begin (234,799,207 samples, 0.26%)</title><rect x="421.9" y="485" width="3.1" height="15.0" fill="rgb(233,133,31)" rx="2" ry="2" />
+<text  x="424.88" y="495.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (208,403,324 samples, 0.23%)</title><rect x="807.7" y="149" width="2.7" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="810.67" y="159.5" ></text>
+</g>
+<g >
+<title>EtherMirror::simple_action (1,061,143,300 samples, 1.18%)</title><rect x="921.0" y="325" width="13.9" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="924.03" y="335.5" ></text>
+</g>
+<g >
+<title>rte_eth_rx_burst (7,015,485,437 samples, 7.77%)</title><rect x="1035.8" y="453" width="91.7" height="15.0" fill="rgb(231,121,29)" rx="2" ry="2" />
+<text  x="1038.82" y="463.5" >rte_eth_rx..</text>
+</g>
+<g >
+<title>Packet::xanno (16,290,767 samples, 0.02%)</title><rect x="745.1" y="165" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="748.07" y="175.5" ></text>
+</g>
+<g >
+<title>Task::scheduled (109,254,096 samples, 0.12%)</title><rect x="1157.2" y="501" width="1.4" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="1160.17" y="511.5" ></text>
+</g>
+<g >
+<title>kworker/u72:2-e (19,849,765 samples, 0.02%)</title><rect x="1185.9" y="597" width="0.3" height="15.0" fill="rgb(241,168,40)" rx="2" ry="2" />
+<text  x="1188.93" y="607.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (25,816,266,916 samples, 28.59%)</title><rect x="559.0" y="277" width="337.4" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="561.99" y="287.5" >Element::Port::push_batch</text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (20,241,500 samples, 0.02%)</title><rect x="826.5" y="149" width="0.3" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="829.50" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::mb (38,607,862 samples, 0.04%)</title><rect x="956.8" y="373" width="0.5" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="959.81" y="383.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (1,413,275,709 samples, 1.57%)</title><rect x="331.3" y="453" width="18.5" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="334.33" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::data (209,301,277 samples, 0.23%)</title><rect x="803.8" y="149" width="2.7" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="806.78" y="159.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::compare_swap (1,193,535,288 samples, 1.32%)</title><rect x="230.7" y="469" width="15.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="233.74" y="479.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="533" width="2.5" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="1185.69" y="543.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_init (65,598,593 samples, 0.07%)</title><rect x="148.8" y="565" width="0.8" height="15.0" fill="rgb(215,48,11)" rx="2" ry="2" />
+<text  x="151.75" y="575.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (30,784,733 samples, 0.03%)</title><rect x="690.1" y="101" width="0.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="693.11" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::mb (42,463,263 samples, 0.05%)</title><rect x="833.0" y="165" width="0.6" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="836.00" y="175.5" ></text>
+</g>
+<g >
+<title>_dl_map_object_from_fd (10,983,023 samples, 0.01%)</title><rect x="147.5" y="373" width="0.2" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="150.54" y="383.5" ></text>
+</g>
+<g >
+<title>Packet::next (55,920,951 samples, 0.06%)</title><rect x="597.8" y="133" width="0.7" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="600.77" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::mb (93,543,580 samples, 0.10%)</title><rect x="825.3" y="149" width="1.2" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="828.28" y="159.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (8,243,706 samples, 0.01%)</title><rect x="147.1" y="533" width="0.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="150.08" y="543.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (28,947,315 samples, 0.03%)</title><rect x="894.9" y="213" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="897.89" y="223.5" ></text>
+</g>
+<g >
+<title>RouterThread::task_end (93,542,462 samples, 0.10%)</title><rect x="1148.4" y="501" width="1.2" height="15.0" fill="rgb(214,44,10)" rx="2" ry="2" />
+<text  x="1151.35" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::mb (47,279,621 samples, 0.05%)</title><rect x="934.3" y="293" width="0.6" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="937.28" y="303.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (26,003,916 samples, 0.03%)</title><rect x="835.5" y="197" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="838.48" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::uniqueify (21,212,944 samples, 0.02%)</title><rect x="737.3" y="181" width="0.2" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="740.25" y="191.5" ></text>
+</g>
+<g >
+<title>x64_sys_call (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="501" width="2.5" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="1185.69" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::mb (90,504,187 samples, 0.10%)</title><rect x="916.0" y="261" width="1.1" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="918.97" y="271.5" ></text>
+</g>
+<g >
+<title>Packet::end_data (34,659,459 samples, 0.04%)</title><rect x="1000.6" y="437" width="0.5" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="1003.60" y="447.5" ></text>
+</g>
+<g >
+<title>DecIPTTL::simple_action (2,139,155,736 samples, 2.37%)</title><rect x="715.2" y="197" width="27.9" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="718.18" y="207.5" >D..</text>
+</g>
+<g >
+<title>RouterThread::run_signals (85,077,066 samples, 0.09%)</title><rect x="323.8" y="453" width="1.2" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="326.85" y="463.5" ></text>
+</g>
+<g >
+<title>[libglib-2.0.so.0.8000.0] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="501" width="0.1" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="1188.62" y="511.5" ></text>
+</g>
+<g >
+<title>RouterThread::set_thread_state (132,383,101 samples, 0.15%)</title><rect x="1145.3" y="501" width="1.8" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="1148.35" y="511.5" ></text>
+</g>
+<g >
+<title>Vector&lt;Classification::Wordwise::Insn, 16ul&gt;::operator[] (34,751,176 samples, 0.04%)</title><rect x="967.1" y="405" width="0.5" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="970.14" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::headroom (22,172,949 samples, 0.02%)</title><rect x="615.2" y="101" width="0.3" height="15.0" fill="rgb(216,54,12)" rx="2" ry="2" />
+<text  x="618.21" y="111.5" ></text>
+</g>
+<g >
+<title>irq_exit_rcu (7,757,194 samples, 0.01%)</title><rect x="1187.1" y="421" width="0.1" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="1190.11" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (74,213,200 samples, 0.08%)</title><rect x="790.5" y="181" width="1.0" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="793.49" y="191.5" ></text>
+</g>
+<g >
+<title>alloc_seg_walk (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="581" width="2.5" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="1185.69" y="591.5" ></text>
+</g>
+<g >
+<title>[irqbalance] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="533" width="0.1" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="1188.62" y="543.5" ></text>
+</g>
+<g >
+<title>_dl_map_object (28,131,725 samples, 0.03%)</title><rect x="147.7" y="341" width="0.4" height="15.0" fill="rgb(248,199,47)" rx="2" ry="2" />
+<text  x="150.71" y="351.5" ></text>
+</g>
+<g >
+<title>ksys_mmap_pgoff (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="469" width="2.5" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="1185.69" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::data (161,151,918 samples, 0.18%)</title><rect x="781.6" y="197" width="2.1" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="784.61" y="207.5" ></text>
+</g>
+<g >
+<title>RouterThread::timer_set (94,771,765 samples, 0.10%)</title><rect x="1178.7" y="517" width="1.2" height="15.0" fill="rgb(218,61,14)" rx="2" ry="2" />
+<text  x="1181.69" y="527.5" ></text>
+</g>
+<g >
+<title>RouterThread::driver_unlock_tasks (114,877,444 samples, 0.13%)</title><rect x="213.3" y="501" width="1.5" height="15.0" fill="rgb(243,176,42)" rx="2" ry="2" />
+<text  x="216.30" y="511.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (9,652,886 samples, 0.01%)</title><rect x="1008.0" y="437" width="0.2" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="1011.03" y="447.5" ></text>
+</g>
+<g >
+<title>atomic_uint64_t::operator++ (20,266,411 samples, 0.02%)</title><rect x="890.3" y="213" width="0.3" height="15.0" fill="rgb(229,111,26)" rx="2" ry="2" />
+<text  x="893.29" y="223.5" ></text>
+</g>
+<g >
+<title>Vector&lt;pollfd, 16ul&gt;::size (53,178,793 samples, 0.06%)</title><rect x="364.4" y="485" width="0.7" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="367.40" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (30,892,884 samples, 0.03%)</title><rect x="731.6" y="165" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="734.59" y="175.5" ></text>
+</g>
+<g >
+<title>IPAddress::IPAddress (50,155,328 samples, 0.06%)</title><rect x="664.9" y="133" width="0.7" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="667.92" y="143.5" ></text>
+</g>
+<g >
+<title>process_one_work (16,837,016 samples, 0.02%)</title><rect x="1185.9" y="517" width="0.3" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="1188.94" y="527.5" ></text>
+</g>
+<g >
+<title>_dl_catch_error (72,780,822 samples, 0.08%)</title><rect x="147.5" y="517" width="0.9" height="15.0" fill="rgb(223,83,20)" rx="2" ry="2" />
+<text  x="150.47" y="527.5" ></text>
+</g>
+<g >
+<title>Packet::end_data (852,710,699 samples, 0.94%)</title><rect x="813.9" y="149" width="11.2" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="816.92" y="159.5" ></text>
+</g>
+<g >
+<title>__memmove_evex_unaligned_erms (89,671,102 samples, 0.10%)</title><rect x="938.0" y="325" width="1.1" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="940.95" y="335.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (21,183,158 samples, 0.02%)</title><rect x="746.6" y="197" width="0.3" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="749.58" y="207.5" ></text>
+</g>
+<g >
+<title>asm_sysvec_apic_timer_interrupt (13,821,547 samples, 0.02%)</title><rect x="1187.0" y="453" width="0.2" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="1190.03" y="463.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_prepend (27,948,015 samples, 0.03%)</title><rect x="636.1" y="101" width="0.4" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="639.12" y="111.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_tasks (59,318,542,349 samples, 65.69%)</title><rect x="369.6" y="501" width="775.1" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="372.57" y="511.5" >RouterThread::run_tasks</text>
+</g>
+<g >
+<title>Packet::mb (28,950,106 samples, 0.03%)</title><rect x="575.8" y="85" width="0.4" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="578.78" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::ip_header (377,202,377 samples, 0.42%)</title><rect x="732.0" y="181" width="4.9" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="734.99" y="191.5" ></text>
+</g>
+<g >
+<title>Classification::Wordwise::Program::match (1,614,299,304 samples, 1.79%)</title><rect x="940.5" y="405" width="21.1" height="15.0" fill="rgb(237,150,35)" rx="2" ry="2" />
+<text  x="943.54" y="415.5" ></text>
+</g>
+<g >
+<title>_dl_start (11,081,087 samples, 0.01%)</title><rect x="149.8" y="565" width="0.1" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="152.77" y="575.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_tailroom (25,093,083 samples, 0.03%)</title><rect x="1002.1" y="437" width="0.3" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="1005.07" y="447.5" ></text>
+</g>
+<g >
+<title>click_compiler_fence (45,424,813 samples, 0.05%)</title><rect x="361.3" y="469" width="0.6" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="364.26" y="479.5" ></text>
+</g>
+<g >
+<title>rte_prefetch0 (123,420,227 samples, 0.14%)</title><rect x="1127.5" y="453" width="1.6" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="1130.50" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::set_anno_u16 (12,524,927 samples, 0.01%)</title><rect x="746.4" y="181" width="0.1" height="15.0" fill="rgb(230,115,27)" rx="2" ry="2" />
+<text  x="749.36" y="191.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (2,720,395,691 samples, 3.01%)</title><rect x="562.2" y="133" width="35.5" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="565.18" y="143.5" >Bat..</text>
+</g>
+<g >
+<title>Packet::xanno (20,268,242 samples, 0.02%)</title><rect x="694.8" y="85" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="697.82" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (53,017,917 samples, 0.06%)</title><rect x="676.9" y="117" width="0.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="679.90" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::mb (87,778,262 samples, 0.10%)</title><rect x="806.5" y="149" width="1.2" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="809.52" y="159.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::tail (10,618,626 samples, 0.01%)</title><rect x="967.0" y="405" width="0.1" height="15.0" fill="rgb(241,169,40)" rx="2" ry="2" />
+<text  x="970.00" y="415.5" ></text>
+</g>
+<g >
+<title> (11,578,370 samples, 0.01%)</title><rect x="578.8" y="53" width="0.2" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="581.80" y="63.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (19,843,047 samples, 0.02%)</title><rect x="1186.6" y="357" width="0.2" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="1189.59" y="367.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,487,640,046 samples, 11.61%)</title><rect x="10.0" y="565" width="137.1" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="13.03" y="575.5" >[unknown]</text>
+</g>
+<g >
+<title>Packet::next (44,307,687 samples, 0.05%)</title><rect x="968.0" y="421" width="0.5" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="970.96" y="431.5" ></text>
+</g>
+<g >
+<title>QueueDevice::lock (67,486,970 samples, 0.07%)</title><rect x="579.1" y="85" width="0.9" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="582.13" y="95.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (216,062,030 samples, 0.24%)</title><rect x="621.6" y="69" width="2.8" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="624.63" y="79.5" ></text>
+</g>
+<g >
+<title>rte_eth_tx_burst (1,252,748,905 samples, 1.39%)</title><rect x="581.1" y="85" width="16.4" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="584.13" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::uniqueify (21,235,649 samples, 0.02%)</title><rect x="687.0" y="133" width="0.3" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="689.98" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (101,298,506 samples, 0.11%)</title><rect x="702.0" y="69" width="1.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="705.02" y="79.5" ></text>
+</g>
+<g >
+<title>dlopen@GLIBC_2.2.5 (72,780,822 samples, 0.08%)</title><rect x="147.5" y="549" width="0.9" height="15.0" fill="rgb(226,97,23)" rx="2" ry="2" />
+<text  x="150.47" y="559.5" ></text>
+</g>
+<g >
+<title>common_ring_mp_enqueue (11,597,805 samples, 0.01%)</title><rect x="1185.3" y="565" width="0.2" height="15.0" fill="rgb(252,217,51)" rx="2" ry="2" />
+<text  x="1188.32" y="575.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (79,098,257 samples, 0.09%)</title><rect x="705.8" y="117" width="1.0" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="708.78" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::next (36,644,833 samples, 0.04%)</title><rect x="749.2" y="245" width="0.4" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="752.16" y="255.5" ></text>
+</g>
+<g >
+<title>Packet::data (29,917,971 samples, 0.03%)</title><rect x="985.9" y="421" width="0.4" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="988.89" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::uniqueify (29,921,535 samples, 0.03%)</title><rect x="929.2" y="309" width="0.4" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="932.20" y="319.5" ></text>
+</g>
+<g >
+<title>Packet::mb (64,661,406 samples, 0.07%)</title><rect x="990.4" y="389" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="993.38" y="399.5" ></text>
+</g>
+<g >
+<title>RouterThread::thread_id (104,406,444 samples, 0.12%)</title><rect x="1149.6" y="501" width="1.3" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="1152.58" y="511.5" ></text>
+</g>
+<g >
+<title>__x64_sys_mmap (8,345,787 samples, 0.01%)</title><rect x="147.6" y="293" width="0.1" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="150.58" y="303.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (47,281,633 samples, 0.05%)</title><rect x="892.1" y="229" width="0.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="895.12" y="239.5" ></text>
+</g>
+<g >
+<title>cpuidle_enter (159,968,114 samples, 0.18%)</title><rect x="1186.9" y="485" width="2.1" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="1189.94" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::set_dst_ip_anno (155,330,717 samples, 0.17%)</title><rect x="672.4" y="133" width="2.1" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="675.44" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::mb (69,470,540 samples, 0.08%)</title><rect x="915.1" y="245" width="0.9" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="918.06" y="255.5" ></text>
+</g>
+<g >
+<title>WritablePacket::data (406,211,518 samples, 0.45%)</title><rect x="929.6" y="309" width="5.3" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="932.59" y="319.5" ></text>
+</g>
+<g >
+<title>RouterThread::master (126,045,653 samples, 0.14%)</title><rect x="296.9" y="469" width="1.6" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="299.90" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (45,326,424 samples, 0.05%)</title><rect x="697.9" y="101" width="0.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="700.92" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (133,990,923 samples, 0.15%)</title><rect x="705.1" y="133" width="1.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="708.07" y="143.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (124,344,216 samples, 0.14%)</title><rect x="830.7" y="133" width="1.6" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="833.71" y="143.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (9,650,058 samples, 0.01%)</title><rect x="557.1" y="357" width="0.2" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="560.15" y="367.5" ></text>
+</g>
+<g >
+<title>IPAddress::addr (48,119,287 samples, 0.05%)</title><rect x="788.7" y="181" width="0.6" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="791.67" y="191.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thread_begin (111,689,158 samples, 0.12%)</title><rect x="1025.2" y="453" width="1.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="1028.24" y="463.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (99,613,540 samples, 0.11%)</title><rect x="327.9" y="453" width="1.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="330.89" y="463.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (27,487,058,211 samples, 30.44%)</title><rect x="558.1" y="325" width="359.2" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="561.06" y="335.5" >Element::Port::push_batch</text>
+</g>
+<g >
+<title>intel_idle (132,244,631 samples, 0.15%)</title><rect x="1187.2" y="453" width="1.8" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="1190.22" y="463.5" ></text>
+</g>
+<g >
+<title>Element::output (12,539,955 samples, 0.01%)</title><rect x="597.5" y="117" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="600.51" y="127.5" ></text>
+</g>
+<g >
+<title>__memset_evex_unaligned_erms (16,367,871 samples, 0.02%)</title><rect x="969.1" y="421" width="0.2" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="972.07" y="431.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (29,333,482,806 samples, 32.49%)</title><rect x="556.8" y="373" width="383.3" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="559.81" y="383.5" >Element::Port::push_batch</text>
+</g>
+<g >
+<title>cpu_startup_entry (191,077,140 samples, 0.21%)</title><rect x="1186.9" y="549" width="2.5" height="15.0" fill="rgb(252,220,52)" rx="2" ry="2" />
+<text  x="1189.93" y="559.5" ></text>
+</g>
+<g >
+<title>Vector&lt;Classification::Wordwise::Insn, 16ul&gt;::operator[] (129,350,339 samples, 0.14%)</title><rect x="959.9" y="389" width="1.7" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="962.94" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header (21,188,353 samples, 0.02%)</title><rect x="696.5" y="117" width="0.3" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="699.51" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::mb (61,761,503 samples, 0.07%)</title><rect x="994.2" y="405" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="997.19" y="415.5" ></text>
+</g>
+<g >
+<title>all (90,298,336,928 samples, 100%)</title><rect x="10.0" y="613" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="623.5" ></text>
+</g>
+<g >
+<title>Packet::mb (29,909,663 samples, 0.03%)</title><rect x="958.6" y="373" width="0.4" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="961.64" y="383.5" ></text>
+</g>
+<g >
+<title>mlx5_rx_burst_vec (3,493,880,718 samples, 3.87%)</title><rect x="1073.7" y="437" width="45.6" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="1076.66" y="447.5" >mlx5..</text>
+</g>
+<g >
+<title>WritablePacket::udp_header (65,559,016 samples, 0.07%)</title><rect x="710.8" y="149" width="0.9" height="15.0" fill="rgb(227,104,24)" rx="2" ry="2" />
+<text  x="713.85" y="159.5" ></text>
+</g>
+<g >
+<title>cpuidle_enter (21,210,751 samples, 0.02%)</title><rect x="1189.4" y="421" width="0.3" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="1192.43" y="431.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::compare_swap (1,312,275,879 samples, 1.45%)</title><rect x="257.3" y="469" width="17.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="260.31" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header_offset (902,681,268 samples, 1.00%)</title><rect x="674.9" y="133" width="11.8" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="677.87" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (108,077,489 samples, 0.12%)</title><rect x="969.6" y="453" width="1.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="972.61" y="463.5" ></text>
+</g>
+<g >
+<title>Element::output (17,351,729 samples, 0.02%)</title><rect x="917.3" y="325" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="920.25" y="335.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (7,720,374 samples, 0.01%)</title><rect x="558.2" y="309" width="0.1" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="561.23" y="319.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_signals (177,605,034 samples, 0.20%)</title><rect x="1173.9" y="517" width="2.3" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="1176.92" y="527.5" ></text>
+</g>
+<g >
+<title>RouterThread::driver_unlock_tasks (1,667,223,073 samples, 1.85%)</title><rect x="252.7" y="485" width="21.8" height="15.0" fill="rgb(243,176,42)" rx="2" ry="2" />
+<text  x="255.68" y="495.5" >R..</text>
+</g>
+<g >
+<title>__libc_start_call_main (79,031,356,951 samples, 87.52%)</title><rect x="149.9" y="549" width="1032.8" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="152.92" y="559.5" >__libc_start_call_main</text>
+</g>
+<g >
+<title>Packet::mb (40,539,147 samples, 0.04%)</title><rect x="1001.1" y="437" width="0.5" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="1004.06" y="447.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (45,419,579 samples, 0.05%)</title><rect x="320.7" y="437" width="0.6" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="323.66" y="447.5" ></text>
+</g>
+<g >
+<title>ib_uverbs_ioctl (7,966,460 samples, 0.01%)</title><rect x="146.9" y="405" width="0.1" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="149.87" y="415.5" ></text>
+</g>
+<g >
+<title>hugetlb_fault (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="373" width="2.5" height="15.0" fill="rgb(235,142,34)" rx="2" ry="2" />
+<text  x="1185.69" y="383.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (52,071,414 samples, 0.06%)</title><rect x="730.9" y="149" width="0.7" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="733.91" y="159.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (11,581,087 samples, 0.01%)</title><rect x="996.2" y="421" width="0.1" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="999.19" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::next (286,449,575 samples, 0.32%)</title><rect x="607.3" y="117" width="3.7" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="610.29" y="127.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (8,345,787 samples, 0.01%)</title><rect x="147.6" y="325" width="0.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="150.58" y="335.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (50,139,527 samples, 0.06%)</title><rect x="934.9" y="325" width="0.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="937.90" y="335.5" ></text>
+</g>
+<g >
+<title>hugetlb_no_page (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="357" width="2.5" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="1185.69" y="367.5" ></text>
+</g>
+<g >
+<title>mlx5_tx_handle_completion (330,631,323 samples, 0.37%)</title><rect x="593.2" y="53" width="4.3" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="596.16" y="63.5" ></text>
+</g>
+<g >
+<title>TimerSet::run_timers (286,037,274 samples, 0.32%)</title><rect x="1158.6" y="501" width="3.7" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="1161.60" y="511.5" ></text>
+</g>
+<g >
+<title>Element::output (7,724,350 samples, 0.01%)</title><rect x="749.1" y="245" width="0.1" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="752.06" y="255.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (38,565,196 samples, 0.04%)</title><rect x="743.1" y="197" width="0.5" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="746.14" y="207.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,471,019,593 samples, 11.60%)</title><rect x="10.0" y="549" width="136.9" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="13.03" y="559.5" >[unknown]</text>
+</g>
+<g >
+<title>Packet::data (378,950,524 samples, 0.42%)</title><rect x="677.6" y="117" width="4.9" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="680.59" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (26,054,238 samples, 0.03%)</title><rect x="966.6" y="389" width="0.4" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="969.62" y="399.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (28,945,991 samples, 0.03%)</title><rect x="709.1" y="149" width="0.4" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="712.15" y="159.5" ></text>
+</g>
+<g >
+<title>handle_mm_fault (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="389" width="2.5" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="1185.69" y="399.5" ></text>
+</g>
+<g >
+<title>cpuidle_idle_call (24,753,103 samples, 0.03%)</title><rect x="1189.4" y="453" width="0.4" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="1192.43" y="463.5" ></text>
+</g>
+<g >
+<title>Element::output (16,404,111 samples, 0.02%)</title><rect x="896.4" y="277" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="899.35" y="287.5" ></text>
+</g>
+<g >
+<title>BatchElement::checked_output_push_batch (29,395,157,358 samples, 32.55%)</title><rect x="556.3" y="405" width="384.1" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="559.29" y="415.5" >BatchElement::checked_output_push_batch</text>
+</g>
+<g >
+<title>Packet::xanno (47,290,479 samples, 0.05%)</title><rect x="975.6" y="421" width="0.6" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="978.60" y="431.5" ></text>
+</g>
+<g >
+<title>alloc_seg (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="565" width="2.5" height="15.0" fill="rgb(210,25,6)" rx="2" ry="2" />
+<text  x="1185.69" y="575.5" ></text>
+</g>
+<g >
+<title>cpuidle_idle_call (174,287,537 samples, 0.19%)</title><rect x="1186.9" y="517" width="2.3" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="1189.94" y="527.5" ></text>
+</g>
+<g >
+<title>Packet::mb (46,323,670 samples, 0.05%)</title><rect x="785.3" y="181" width="0.6" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="788.32" y="191.5" ></text>
+</g>
+<g >
+<title>Packet::length (245,035,110 samples, 0.27%)</title><rect x="912.8" y="261" width="3.2" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="915.77" y="271.5" ></text>
+</g>
+<g >
+<title>CheckIPHeader::valid (46,322,820 samples, 0.05%)</title><rect x="891.5" y="229" width="0.6" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="894.51" y="239.5" ></text>
+</g>
+<g >
+<title>kthread (19,704,636 samples, 0.02%)</title><rect x="1185.9" y="549" width="0.3" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1188.94" y="559.5" ></text>
+</g>
+<g >
+<title>Packet::mb (27,012,511 samples, 0.03%)</title><rect x="615.5" y="101" width="0.4" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="618.50" y="111.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::first (24,126,446 samples, 0.03%)</title><rect x="965.8" y="405" width="0.4" height="15.0" fill="rgb(227,104,25)" rx="2" ry="2" />
+<text  x="968.84" y="415.5" ></text>
+</g>
+<g >
+<title>ToDPDKDevice::push_batch (2,607,632,243 samples, 2.89%)</title><rect x="563.4" y="101" width="34.1" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="566.43" y="111.5" >To..</text>
+</g>
+<g >
+<title>RouterThread::master (88,967,331 samples, 0.10%)</title><rect x="274.5" y="485" width="1.1" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="277.46" y="495.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (12,545,322 samples, 0.01%)</title><rect x="612.5" y="117" width="0.1" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="615.47" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::data (168,932,716 samples, 0.19%)</title><rect x="955.1" y="389" width="2.2" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="958.11" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::next (59,838,777 samples, 0.07%)</title><rect x="896.7" y="293" width="0.8" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="899.70" y="303.5" ></text>
+</g>
+<g >
+<title>RouterThread::set_thread_state (150,717,120 samples, 0.17%)</title><rect x="419.9" y="485" width="2.0" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="422.91" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::mb (63,670,282 samples, 0.07%)</title><rect x="903.5" y="277" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="906.47" y="287.5" ></text>
+</g>
+<g >
+<title>do_faccessat (8,243,706 samples, 0.01%)</title><rect x="147.1" y="485" width="0.1" height="15.0" fill="rgb(208,14,3)" rx="2" ry="2" />
+<text  x="150.08" y="495.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (32,022,438,833 samples, 35.46%)</title><rect x="551.0" y="453" width="418.5" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="554.00" y="463.5" >BatchElement::output_push_batch</text>
+</g>
+<g >
+<title>Packet::data (34,643,180 samples, 0.04%)</title><rect x="886.6" y="213" width="0.5" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="889.61" y="223.5" ></text>
+</g>
+<g >
+<title>start_kernel (37,917,886 samples, 0.04%)</title><rect x="1189.4" y="533" width="0.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="1192.42" y="543.5" ></text>
+</g>
+<g >
+<title>RouterThread::active (162,182,462 samples, 0.18%)</title><rect x="294.8" y="469" width="2.1" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="297.78" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::data (33,772,865 samples, 0.04%)</title><rect x="813.5" y="149" width="0.4" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="816.48" y="159.5" ></text>
+</g>
+<g >
+<title>rxq_cq_process_v (626,388,690 samples, 0.69%)</title><rect x="1119.3" y="437" width="8.2" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="1122.31" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (13,426,949 samples, 0.01%)</title><rect x="895.3" y="229" width="0.2" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="898.29" y="239.5" ></text>
+</g>
+<g >
+<title>record__pushfn (20,057,814 samples, 0.02%)</title><rect x="1186.6" y="437" width="0.2" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="1189.59" y="447.5" ></text>
+</g>
+<g >
+<title>SelectSet::run_selects (65,042,833 samples, 0.07%)</title><rect x="1154.7" y="501" width="0.9" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="1157.73" y="511.5" ></text>
+</g>
+<g >
+<title>x64_sys_call (19,272,105 samples, 0.02%)</title><rect x="1186.6" y="341" width="0.2" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="1189.59" y="351.5" ></text>
+</g>
+<g >
+<title>Packet::mb (98,378,142 samples, 0.11%)</title><rect x="785.9" y="197" width="1.3" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="788.93" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (201,548,965 samples, 0.22%)</title><rect x="608.2" y="101" width="2.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="611.19" y="111.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (8,189,713 samples, 0.01%)</title><rect x="146.9" y="453" width="0.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="149.86" y="463.5" ></text>
+</g>
+<g >
+<title>dl_main (11,081,087 samples, 0.01%)</title><rect x="149.8" y="533" width="0.1" height="15.0" fill="rgb(236,145,34)" rx="2" ry="2" />
+<text  x="152.77" y="543.5" ></text>
+</g>
+<g >
+<title>Element::output (15,357,748 samples, 0.02%)</title><rect x="712.3" y="197" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="715.27" y="207.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (17,375,484 samples, 0.02%)</title><rect x="896.1" y="229" width="0.3" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="899.12" y="239.5" ></text>
+</g>
+<g >
+<title>Packet::data (45,335,159 samples, 0.05%)</title><rect x="666.1" y="133" width="0.6" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="669.10" y="143.5" ></text>
+</g>
+<g >
+<title>click_current_cpu_id (101,620,321 samples, 0.11%)</title><rect x="1029.2" y="453" width="1.3" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="1032.15" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (10,619,306 samples, 0.01%)</title><rect x="1007.6" y="437" width="0.2" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="1010.63" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::data (29,925,067 samples, 0.03%)</title><rect x="928.8" y="309" width="0.4" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="931.81" y="319.5" ></text>
+</g>
+<g >
+<title>Packet::next (192,943,230 samples, 0.21%)</title><rect x="892.7" y="229" width="2.6" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="895.75" y="239.5" ></text>
+</g>
+<g >
+<title>Packet::mb (27,026,885 samples, 0.03%)</title><rect x="672.1" y="133" width="0.3" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="675.08" y="143.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thread_begin (10,613,299 samples, 0.01%)</title><rect x="580.0" y="69" width="0.2" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="583.02" y="79.5" ></text>
+</g>
+<g >
+<title>Packet::set_anno_u16 (10,614,273 samples, 0.01%)</title><rect x="612.3" y="101" width="0.1" height="15.0" fill="rgb(230,115,27)" rx="2" ry="2" />
+<text  x="615.30" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (13,476,263 samples, 0.01%)</title><rect x="709.6" y="133" width="0.2" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="712.62" y="143.5" ></text>
+</g>
+<g >
+<title>_dl_catch_exception (40,125,685 samples, 0.04%)</title><rect x="147.7" y="373" width="0.5" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="150.71" y="383.5" ></text>
+</g>
+<g >
+<title>WritablePacket::data (25,098,143 samples, 0.03%)</title><rect x="937.6" y="325" width="0.4" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="940.62" y="335.5" ></text>
+</g>
+<g >
+<title>Vector&lt;IPAddress, 16ul&gt;::end (39,474,533 samples, 0.04%)</title><rect x="889.8" y="213" width="0.5" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="892.77" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::set_anno_u16 (14,475,531 samples, 0.02%)</title><rect x="709.3" y="133" width="0.2" height="15.0" fill="rgb(230,115,27)" rx="2" ry="2" />
+<text  x="712.29" y="143.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (103,396,203 samples, 0.11%)</title><rect x="357.6" y="469" width="1.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="360.56" y="479.5" ></text>
+</g>
+<g >
+<title>vfs_write (18,818,961 samples, 0.02%)</title><rect x="1186.6" y="293" width="0.2" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="1189.60" y="303.5" ></text>
+</g>
+<g >
+<title>_dl_open (72,780,822 samples, 0.08%)</title><rect x="147.5" y="469" width="0.9" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="150.47" y="479.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (5,746,966,399 samples, 6.36%)</title><rect x="561.4" y="165" width="75.1" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="564.41" y="175.5" >Element:..</text>
+</g>
+<g >
+<title>CheckIPHeader::valid (9,932,855,400 samples, 11.00%)</title><rect x="755.4" y="213" width="129.8" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="758.42" y="223.5" >CheckIPHeader::v..</text>
+</g>
+<g >
+<title>Vector&lt;IPAddress, 16ul&gt;::begin (45,326,705 samples, 0.05%)</title><rect x="889.2" y="213" width="0.6" height="15.0" fill="rgb(251,213,50)" rx="2" ry="2" />
+<text  x="892.18" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::has_network_header (229,485,366 samples, 0.25%)</title><rect x="729.0" y="181" width="3.0" height="15.0" fill="rgb(208,13,3)" rx="2" ry="2" />
+<text  x="731.99" y="191.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (19,843,047 samples, 0.02%)</title><rect x="1186.6" y="373" width="0.2" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="1189.59" y="383.5" ></text>
+</g>
+<g >
+<title>writen (20,057,814 samples, 0.02%)</title><rect x="1186.6" y="421" width="0.2" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="1189.59" y="431.5" ></text>
+</g>
+<g >
+<title>WritablePacket::ip_header (429,369,738 samples, 0.48%)</title><rect x="737.5" y="181" width="5.6" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="740.53" y="191.5" ></text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (79,032,222,591 samples, 87.52%)</title><rect x="149.9" y="565" width="1032.8" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="152.91" y="575.5" >__libc_start_main@@GLIBC_2.34</text>
+</g>
+<g >
+<title>Packet::all_anno (33,782,563 samples, 0.04%)</title><rect x="962.3" y="405" width="0.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="965.26" y="415.5" ></text>
+</g>
+<g >
+<title>_dl_catch_exception (72,780,822 samples, 0.08%)</title><rect x="147.5" y="501" width="0.9" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="150.47" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (22,178,897 samples, 0.02%)</title><rect x="687.3" y="133" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="690.26" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::shared (32,799,962 samples, 0.04%)</title><rect x="625.7" y="85" width="0.4" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="628.70" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::set_ip_header (3,464,737,880 samples, 3.84%)</title><rect x="789.6" y="197" width="45.3" height="15.0" fill="rgb(228,108,26)" rx="2" ry="2" />
+<text  x="792.61" y="207.5" >Pack..</text>
+</g>
+<g >
+<title>Packet::length (19,303,776 samples, 0.02%)</title><rect x="704.4" y="149" width="0.3" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="707.41" y="159.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (29,006,599 samples, 0.03%)</title><rect x="1159.4" y="469" width="0.4" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="1162.37" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::make (51,007,932 samples, 0.06%)</title><rect x="971.9" y="453" width="0.6" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="974.88" y="463.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (155,217,610 samples, 0.17%)</title><rect x="292.2" y="453" width="2.0" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="295.18" y="463.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (8,189,713 samples, 0.01%)</title><rect x="146.9" y="469" width="0.1" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="149.86" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (86,869,420 samples, 0.10%)</title><rect x="1003.8" y="437" width="1.2" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="1006.83" y="447.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator= (9,670,936 samples, 0.01%)</title><rect x="1161.6" y="469" width="0.2" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="1164.65" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (8,689,564 samples, 0.01%)</title><rect x="745.7" y="181" width="0.1" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="748.66" y="191.5" ></text>
+</g>
+<g >
+<title>Packet::ip_header (24,138,443 samples, 0.03%)</title><rect x="743.9" y="197" width="0.3" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="746.92" y="207.5" ></text>
+</g>
+<g >
+<title>RouterThread::driver_lock_tasks (98,573,696 samples, 0.11%)</title><rect x="212.0" y="501" width="1.3" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="215.01" y="511.5" ></text>
+</g>
+<g >
+<title>Vector&lt;pollfd, 16ul&gt;::size (140,175,014 samples, 0.16%)</title><rect x="355.7" y="469" width="1.9" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="358.73" y="479.5" ></text>
+</g>
+<g >
+<title>IPAddress::addr (39,546,538 samples, 0.04%)</title><rect x="665.6" y="133" width="0.5" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="668.58" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (31,849,983 samples, 0.04%)</title><rect x="1006.8" y="437" width="0.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="1009.77" y="447.5" ></text>
+</g>
+<g >
+<title>ib_uverbs_run_method (7,708,977 samples, 0.01%)</title><rect x="146.9" y="373" width="0.1" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="149.87" y="383.5" ></text>
+</g>
+<g >
+<title>Master::paused (43,513,488 samples, 0.05%)</title><rect x="1159.3" y="485" width="0.5" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="1162.26" y="495.5" ></text>
+</g>
+<g >
+<title>click_in_cksum (39,558,631 samples, 0.04%)</title><rect x="890.6" y="213" width="0.5" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="893.55" y="223.5" ></text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="565" width="0.4" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="1189.47" y="575.5" ></text>
+</g>
+<g >
+<title>mlx5_tx_burst_i (1,195,822,506 samples, 1.32%)</title><rect x="581.8" y="69" width="15.7" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="584.85" y="79.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::count (9,630,773 samples, 0.01%)</title><rect x="746.1" y="197" width="0.1" height="15.0" fill="rgb(221,75,17)" rx="2" ry="2" />
+<text  x="749.11" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (20,273,639 samples, 0.02%)</title><rect x="736.7" y="149" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="739.66" y="159.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (11,591,032,234 samples, 12.84%)</title><rect x="560.8" y="197" width="151.5" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="563.80" y="207.5" >Element::Port::push..</text>
+</g>
+<g >
+<title>click_compiler_fence (11,571,323 samples, 0.01%)</title><rect x="296.7" y="453" width="0.2" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="299.75" y="463.5" ></text>
+</g>
+<g >
+<title>g_main_loop_run (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="517" width="0.1" height="15.0" fill="rgb(229,112,26)" rx="2" ry="2" />
+<text  x="1188.62" y="527.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (27,979,271 samples, 0.03%)</title><rect x="966.2" y="405" width="0.3" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="969.16" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (9,653,244 samples, 0.01%)</title><rect x="896.2" y="213" width="0.1" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="899.21" y="223.5" ></text>
+</g>
+<g >
+<title>__mm_populate (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="437" width="2.5" height="15.0" fill="rgb(218,61,14)" rx="2" ry="2" />
+<text  x="1185.69" y="447.5" ></text>
+</g>
+<g >
+<title>WritablePacket::ip_header (57,879,477 samples, 0.06%)</title><rect x="746.9" y="197" width="0.7" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="749.85" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::uniqueify (23,136,060 samples, 0.03%)</title><rect x="745.8" y="197" width="0.3" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="748.81" y="207.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (75,713,827 samples, 0.08%)</title><rect x="360.3" y="469" width="1.0" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="363.27" y="479.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (26,031,391 samples, 0.03%)</title><rect x="746.2" y="197" width="0.4" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="749.24" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::has_network_header (21,220,007 samples, 0.02%)</title><rect x="743.6" y="197" width="0.3" height="15.0" fill="rgb(208,13,3)" rx="2" ry="2" />
+<text  x="746.64" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (122,577,933 samples, 0.14%)</title><rect x="684.7" y="101" width="1.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="687.71" y="111.5" ></text>
+</g>
+<g >
+<title>SimpleElement&lt;CheckIPHeader&gt;::_sm_action_batch (11,224,042,628 samples, 12.43%)</title><rect x="749.7" y="245" width="146.7" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="752.68" y="255.5" >SimpleElement&lt;Chec..</text>
+</g>
+<g >
+<title>htons (33,762,838 samples, 0.04%)</title><rect x="891.1" y="213" width="0.4" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="894.07" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::next (55,014,307 samples, 0.06%)</title><rect x="939.4" y="341" width="0.7" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="942.39" y="351.5" ></text>
+</g>
+<g >
+<title>rte_eth_rx_burst (144,032,921 samples, 0.16%)</title><rect x="1133.7" y="469" width="1.9" height="15.0" fill="rgb(231,121,29)" rx="2" ry="2" />
+<text  x="1136.74" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (199,705,594 samples, 0.22%)</title><rect x="905.1" y="261" width="2.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="908.07" y="271.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (17,337,507 samples, 0.02%)</title><rect x="1005.0" y="437" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1007.97" y="447.5" ></text>
+</g>
+<g >
+<title>_dl_map_object (13,860,387 samples, 0.02%)</title><rect x="147.5" y="389" width="0.2" height="15.0" fill="rgb(248,199,47)" rx="2" ry="2" />
+<text  x="150.52" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::set_dst_ip_anno (45,246,562 samples, 0.05%)</title><rect x="707.2" y="149" width="0.6" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="710.17" y="159.5" ></text>
+</g>
+<g >
+<title>BatchElement::push_batch (13,510,267 samples, 0.01%)</title><rect x="557.9" y="325" width="0.2" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="560.88" y="335.5" ></text>
+</g>
+<g >
+<title>Packet::data (38,601,758 samples, 0.04%)</title><rect x="810.4" y="165" width="0.5" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="813.39" y="175.5" ></text>
+</g>
+<g >
+<title>_dl_catch_exception (71,820,161 samples, 0.08%)</title><rect x="147.5" y="453" width="0.9" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="150.47" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (50,197,712 samples, 0.06%)</title><rect x="1004.3" y="421" width="0.7" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1007.31" y="431.5" ></text>
+</g>
+<g >
+<title>htons@plt (20,244,126 samples, 0.02%)</title><rect x="712.0" y="149" width="0.3" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="715.01" y="159.5" ></text>
+</g>
+<g >
+<title>DPDKDevice::get_mbuf (255,648,710 samples, 0.28%)</title><rect x="571.8" y="85" width="3.3" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="574.79" y="95.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (14,458,142,013 samples, 16.01%)</title><rect x="560.1" y="245" width="189.0" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="563.12" y="255.5" >Element::Port::push_batch</text>
+</g>
+<g >
+<title>start_secondary (191,077,140 samples, 0.21%)</title><rect x="1186.9" y="565" width="2.5" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="1189.93" y="575.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (57,753,909 samples, 0.06%)</title><rect x="577.6" y="53" width="0.7" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="580.59" y="63.5" ></text>
+</g>
+<g >
+<title>RouterThread::master (198,588,013 samples, 0.22%)</title><rect x="321.3" y="453" width="2.5" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="324.25" y="463.5" ></text>
+</g>
+<g >
+<title>cpuidle_enter_state (158,925,514 samples, 0.18%)</title><rect x="1187.0" y="469" width="2.0" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="1189.95" y="479.5" ></text>
+</g>
+<g >
+<title> (7,720,143 samples, 0.01%)</title><rect x="1008.4" y="421" width="0.1" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="1011.41" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (24,100,206 samples, 0.03%)</title><rect x="964.8" y="389" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="967.82" y="399.5" ></text>
+</g>
+<g >
+<title>SelectSet::run_selects (6,254,581,165 samples, 6.93%)</title><rect x="280.1" y="485" width="81.8" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="283.12" y="495.5" >SelectSet..</text>
+</g>
+<g >
+<title>Packet::network_header (26,993,463 samples, 0.03%)</title><rect x="695.1" y="117" width="0.3" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="698.09" y="127.5" ></text>
+</g>
+<g >
+<title>RouterThread::set_thread_state (58,017,973 samples, 0.06%)</title><rect x="230.0" y="469" width="0.7" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="232.98" y="479.5" ></text>
+</g>
+<g >
+<title>ext4_da_write_begin (13,755,331 samples, 0.02%)</title><rect x="1186.6" y="229" width="0.2" height="15.0" fill="rgb(211,32,7)" rx="2" ry="2" />
+<text  x="1189.61" y="239.5" ></text>
+</g>
+<g >
+<title>mlx5dv_dr_rule_create (9,247,948 samples, 0.01%)</title><rect x="146.9" y="533" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="149.86" y="543.5" ></text>
+</g>
+<g >
+<title>ret_from_fork (19,704,636 samples, 0.02%)</title><rect x="1185.9" y="565" width="0.3" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="1188.94" y="575.5" ></text>
+</g>
+<g >
+<title>click_in_cksum (3,121,319,626 samples, 3.46%)</title><rect x="844.4" y="197" width="40.8" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="847.44" y="207.5" >cli..</text>
+</g>
+<g >
+<title>htons@plt (25,088,088 samples, 0.03%)</title><rect x="748.4" y="197" width="0.3" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="751.40" y="207.5" ></text>
+</g>
+<g >
+<title>QueueDevice::id_for_thread (21,196,978 samples, 0.02%)</title><rect x="580.5" y="53" width="0.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="583.54" y="63.5" ></text>
+</g>
+<g >
+<title>Packet::mb (95,513,672 samples, 0.11%)</title><rect x="624.4" y="85" width="1.3" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="627.45" y="95.5" ></text>
+</g>
+<g >
+<title>RouterThread::select_set (93,713,702 samples, 0.10%)</title><rect x="275.6" y="485" width="1.2" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="278.62" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (10,613,801 samples, 0.01%)</title><rect x="611.8" y="101" width="0.1" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="614.78" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (18,337,742 samples, 0.02%)</title><rect x="703.3" y="85" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="706.34" y="95.5" ></text>
+</g>
+<g >
+<title>RouterThread::driver (78,306,226,865 samples, 86.72%)</title><rect x="149.9" y="517" width="1023.3" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="152.92" y="527.5" >RouterThread::driver</text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (435,777,238 samples, 0.48%)</title><rect x="246.3" y="469" width="5.7" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="249.34" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::mb (62,675,923 samples, 0.07%)</title><rect x="993.4" y="389" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="996.37" y="399.5" ></text>
+</g>
+<g >
+<title>Task::fire (111,175,535 samples, 0.12%)</title><rect x="1155.7" y="501" width="1.5" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="1158.72" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (7,720,598 samples, 0.01%)</title><rect x="707.8" y="149" width="0.1" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="710.76" y="159.5" ></text>
+</g>
+<g >
+<title>_dl_start_user (13,761,497 samples, 0.02%)</title><rect x="149.7" y="581" width="0.2" height="15.0" fill="rgb(236,145,34)" rx="2" ry="2" />
+<text  x="152.73" y="591.5" ></text>
+</g>
+<g >
+<title>ret_from_fork_asm (19,704,636 samples, 0.02%)</title><rect x="1185.9" y="581" width="0.3" height="15.0" fill="rgb(240,163,39)" rx="2" ry="2" />
+<text  x="1188.94" y="591.5" ></text>
+</g>
+<g >
+<title>Packet::mb (94,509,946 samples, 0.10%)</title><rect x="670.8" y="117" width="1.3" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="673.85" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (49,177,141 samples, 0.05%)</title><rect x="575.1" y="85" width="0.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="578.13" y="95.5" ></text>
+</g>
+<g >
+<title>_start (79,032,222,591 samples, 87.52%)</title><rect x="149.9" y="581" width="1032.8" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="152.91" y="591.5" >_start</text>
+</g>
+<g >
+<title>Packet::end_data (51,121,849 samples, 0.06%)</title><rect x="832.3" y="165" width="0.7" height="15.0" fill="rgb(216,55,13)" rx="2" ry="2" />
+<text  x="835.34" y="175.5" ></text>
+</g>
+<g >
+<title>htons (60,696,708 samples, 0.07%)</title><rect x="747.6" y="197" width="0.8" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="750.61" y="207.5" ></text>
+</g>
+<g >
+<title>ext4_buffered_write_iter (18,818,961 samples, 0.02%)</title><rect x="1186.6" y="261" width="0.2" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="1189.60" y="271.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_signals (106,333,554 samples, 0.12%)</title><rect x="298.5" y="469" width="1.4" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="301.55" y="479.5" ></text>
+</g>
+<g >
+<title>htons (23,156,050 samples, 0.03%)</title><rect x="711.7" y="149" width="0.3" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="714.71" y="159.5" ></text>
+</g>
+<g >
+<title>click_compiler_fence (99,458,061 samples, 0.11%)</title><rect x="1171.9" y="501" width="1.3" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="1174.91" y="511.5" ></text>
+</g>
+<g >
+<title>per_thread&lt;QueueDevice::ThreadState&gt;::operator (7,720,143 samples, 0.01%)</title><rect x="1008.4" y="437" width="0.1" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="1011.41" y="447.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::attempt (125,601,563 samples, 0.14%)</title><rect x="1159.8" y="485" width="1.7" height="15.0" fill="rgb(223,83,20)" rx="2" ry="2" />
+<text  x="1162.83" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header (387,580,518 samples, 0.43%)</title><rect x="698.5" y="101" width="5.1" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="701.51" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (84,867,981 samples, 0.09%)</title><rect x="730.5" y="165" width="1.1" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="733.48" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::set_ip_header (76,122,201 samples, 0.08%)</title><rect x="888.2" y="213" width="1.0" height="15.0" fill="rgb(228,108,26)" rx="2" ry="2" />
+<text  x="891.18" y="223.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thisthread_begin (13,508,175 samples, 0.01%)</title><rect x="580.0" y="85" width="0.2" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="583.01" y="95.5" ></text>
+</g>
+<g >
+<title>RouterThread::set_thread_state (82,161,435 samples, 0.09%)</title><rect x="276.8" y="485" width="1.1" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="279.85" y="495.5" ></text>
+</g>
+<g >
+<title>cmd_record (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="501" width="0.4" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="1189.47" y="511.5" ></text>
+</g>
+<g >
+<title>Unstrip::simple_action_batch (1,824,760,400 samples, 2.02%)</title><rect x="612.6" y="117" width="23.9" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="615.64" y="127.5" >U..</text>
+</g>
+<g >
+<title>RouterThread::run_os (11,689,547,698 samples, 12.95%)</title><rect x="214.8" y="501" width="152.8" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="217.80" y="511.5" >RouterThread::run_os</text>
+</g>
+<g >
+<title>atomic_uint32_t::operator unsigned int (515,526,636 samples, 0.57%)</title><rect x="313.9" y="437" width="6.8" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="316.92" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (7,723,071 samples, 0.01%)</title><rect x="1008.0" y="421" width="0.1" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="1011.03" y="431.5" ></text>
+</g>
+<g >
+<title>RouterThread::stop_flag (48,270,405 samples, 0.05%)</title><rect x="277.9" y="485" width="0.7" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="280.92" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (27,000,561 samples, 0.03%)</title><rect x="733.1" y="165" width="0.3" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="736.08" y="175.5" ></text>
+</g>
+<g >
+<title>Master::paused (394,184,088 samples, 0.44%)</title><rect x="289.6" y="469" width="5.2" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="292.63" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (28,921,209 samples, 0.03%)</title><rect x="739.2" y="149" width="0.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="742.23" y="159.5" ></text>
+</g>
+<g >
+<title>__get_user_pages (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="405" width="2.5" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="1185.69" y="415.5" ></text>
+</g>
+<g >
+<title>x86_64_start_kernel (37,917,886 samples, 0.04%)</title><rect x="1189.4" y="565" width="0.5" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="1192.42" y="575.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::first (25,017,891 samples, 0.03%)</title><rect x="968.6" y="421" width="0.3" height="15.0" fill="rgb(227,104,25)" rx="2" ry="2" />
+<text  x="971.62" y="431.5" ></text>
+</g>
+<g >
+<title>record__mmap_read_evlist (21,591,832 samples, 0.02%)</title><rect x="1186.6" y="469" width="0.3" height="15.0" fill="rgb(228,106,25)" rx="2" ry="2" />
+<text  x="1189.57" y="479.5" ></text>
+</g>
+<g >
+<title>RouterThread::timer_set (290,145,409 samples, 0.32%)</title><rect x="1150.9" y="501" width="3.8" height="15.0" fill="rgb(218,61,14)" rx="2" ry="2" />
+<text  x="1153.94" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::set_packet_type_anno (23,126,313 samples, 0.03%)</title><rect x="1130.6" y="469" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1133.56" y="479.5" ></text>
+</g>
+<g >
+<title>Vector&lt;TimerSet::heap_element, 16ul&gt;::size (24,178,260 samples, 0.03%)</title><rect x="1161.8" y="485" width="0.3" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="1164.77" y="495.5" ></text>
+</g>
+<g >
+<title>SelectSet::post_select (2,079,124,740 samples, 2.30%)</title><rect x="302.0" y="469" width="27.2" height="15.0" fill="rgb(217,58,14)" rx="2" ry="2" />
+<text  x="305.03" y="479.5" >S..</text>
+</g>
+<g >
+<title>__libc_start_call_main (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="549" width="0.1" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="1188.62" y="559.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (27,537,147,927 samples, 30.50%)</title><rect x="557.7" y="341" width="359.8" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="560.65" y="351.5" >BatchElement::output_push_batch</text>
+</g>
+<g >
+<title>Packet::xanno (26,992,548 samples, 0.03%)</title><rect x="686.3" y="101" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="689.31" y="111.5" ></text>
+</g>
+<g >
+<title>eal_plugins_init.cold (76,374,732 samples, 0.08%)</title><rect x="147.4" y="565" width="1.0" height="15.0" fill="rgb(221,75,18)" rx="2" ry="2" />
+<text  x="150.42" y="575.5" ></text>
+</g>
+<g >
+<title>sysvec_apic_timer_interrupt (13,701,366 samples, 0.02%)</title><rect x="1187.0" y="437" width="0.2" height="15.0" fill="rgb(220,69,16)" rx="2" ry="2" />
+<text  x="1190.04" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (134,094,803 samples, 0.15%)</title><rect x="609.1" y="85" width="1.7" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="612.07" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::set_dst_ip_anno (55,956,402 samples, 0.06%)</title><rect x="887.5" y="213" width="0.7" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="890.45" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::data (278,865,609 samples, 0.31%)</title><rect x="987.6" y="405" width="3.6" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="990.58" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (34,711,979 samples, 0.04%)</title><rect x="674.0" y="117" width="0.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="677.01" y="127.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (11,615,077,754 samples, 12.86%)</title><rect x="560.8" y="213" width="151.7" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="563.75" y="223.5" >BatchElement::outpu..</text>
+</g>
+<g >
+<title>perf (31,638,406 samples, 0.04%)</title><rect x="1186.4" y="597" width="0.5" height="15.0" fill="rgb(242,171,40)" rx="2" ry="2" />
+<text  x="1189.45" y="607.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (15,443,770 samples, 0.02%)</title><rect x="1007.0" y="421" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1009.98" y="431.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_os (54,056,931 samples, 0.06%)</title><rect x="1173.2" y="517" width="0.7" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="1176.21" y="527.5" ></text>
+</g>
+<g >
+<title>swapper (230,028,526 samples, 0.25%)</title><rect x="1186.9" y="597" width="3.0" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="1189.91" y="607.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (16,388,792 samples, 0.02%)</title><rect x="610.8" y="101" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="613.82" y="111.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_prepend (676,053,465 samples, 0.75%)</title><rect x="626.7" y="85" width="8.8" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="629.69" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::buffer (605,573,381 samples, 0.67%)</title><rect x="976.2" y="437" width="7.9" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="979.21" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::ip_header (333,827,311 samples, 0.37%)</title><rect x="738.5" y="165" width="4.4" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="741.50" y="175.5" ></text>
+</g>
+<g >
+<title>Element::port (16,389,037 samples, 0.02%)</title><rect x="917.3" y="309" width="0.2" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="920.26" y="319.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (40,512,931 samples, 0.04%)</title><rect x="1130.0" y="469" width="0.6" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="1133.03" y="479.5" ></text>
+</g>
+<g >
+<title>Vector&lt;IPAddress, 16ul&gt;::end (156,240,774 samples, 0.17%)</title><rect x="836.1" y="197" width="2.0" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="839.09" y="207.5" ></text>
+</g>
+<g >
+<title>Task::fire (54,183,608,450 samples, 60.01%)</title><rect x="427.9" y="485" width="708.0" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="430.87" y="495.5" >Task::fire</text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (194,836,684 samples, 0.22%)</title><rect x="633.0" y="69" width="2.5" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="635.98" y="79.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (41,494,685 samples, 0.05%)</title><rect x="833.6" y="165" width="0.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="836.56" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (61,765,286 samples, 0.07%)</title><rect x="902.4" y="277" width="0.8" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="905.38" y="287.5" ></text>
+</g>
+<g >
+<title>QueueDevice::id_for_thread (27,952,142 samples, 0.03%)</title><rect x="580.5" y="69" width="0.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="583.46" y="79.5" ></text>
+</g>
+<g >
+<title>secondary_startup_64_no_verify (228,995,026 samples, 0.25%)</title><rect x="1186.9" y="581" width="3.0" height="15.0" fill="rgb(239,157,37)" rx="2" ry="2" />
+<text  x="1189.93" y="591.5" ></text>
+</g>
+<g >
+<title>WritablePacket::udp_header (622,863,268 samples, 0.69%)</title><rect x="695.4" y="133" width="8.2" height="15.0" fill="rgb(227,104,24)" rx="2" ry="2" />
+<text  x="698.44" y="143.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator= (103,751,524 samples, 0.11%)</title><rect x="358.9" y="469" width="1.4" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="361.91" y="479.5" ></text>
+</g>
+<g >
+<title>IPAddress::IPAddress (172,653,694 samples, 0.19%)</title><rect x="779.0" y="197" width="2.3" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="782.04" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (75,299,849 samples, 0.08%)</title><rect x="741.6" y="117" width="1.0" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="744.60" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (37,643,458 samples, 0.04%)</title><rect x="936.5" y="293" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="939.45" y="303.5" ></text>
+</g>
+<g >
+<title>DecIPTTL::simple_action (44,341,376 samples, 0.05%)</title><rect x="712.5" y="213" width="0.6" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="715.54" y="223.5" ></text>
+</g>
+<g >
+<title>Element::port (9,654,652 samples, 0.01%)</title><rect x="969.3" y="421" width="0.1" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="972.28" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::network_header (21,234,884 samples, 0.02%)</title><rect x="742.9" y="165" width="0.2" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="745.86" y="175.5" ></text>
+</g>
+<g >
+<title>click_compiler_fence (94,703,380 samples, 0.10%)</title><rect x="1181.4" y="517" width="1.2" height="15.0" fill="rgb(226,101,24)" rx="2" ry="2" />
+<text  x="1184.36" y="527.5" ></text>
+</g>
+<g >
+<title>main (79,031,249,469 samples, 87.52%)</title><rect x="149.9" y="533" width="1032.8" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="152.92" y="543.5" >main</text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thread_begin (8,685,771 samples, 0.01%)</title><rect x="579.6" y="37" width="0.1" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="582.58" y="47.5" ></text>
+</g>
+<g >
+<title>rte_mempool_op_populate_helper (13,990,784 samples, 0.02%)</title><rect x="1185.3" y="581" width="0.2" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="1188.29" y="591.5" ></text>
+</g>
+<g >
+<title>rxq_cq_process_v (10,470,811,019 samples, 11.60%)</title><rect x="10.0" y="533" width="136.9" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="13.03" y="543.5" >rxq_cq_process_v</text>
+</g>
+<g >
+<title>Element::Port::push_batch (10,615,462 samples, 0.01%)</title><rect x="969.5" y="453" width="0.1" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="972.46" y="463.5" ></text>
+</g>
+<g >
+<title>QueueDevice::id_for_thread (21,227,120 samples, 0.02%)</title><rect x="579.4" y="53" width="0.3" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="582.43" y="63.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::count (26,961,184 samples, 0.03%)</title><rect x="895.5" y="229" width="0.3" height="15.0" fill="rgb(221,75,17)" rx="2" ry="2" />
+<text  x="898.49" y="239.5" ></text>
+</g>
+<g >
+<title>Packet::next (99,206,583 samples, 0.11%)</title><rect x="744.2" y="197" width="1.3" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="747.23" y="207.5" ></text>
+</g>
+<g >
+<title>Packet::data (290,454,196 samples, 0.32%)</title><rect x="930.5" y="293" width="3.8" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="933.49" y="303.5" ></text>
+</g>
+<g >
+<title>SimpleElement&lt;IPMirror&gt;::push_batch (11,570,793,797 samples, 12.81%)</title><rect x="561.1" y="181" width="151.2" height="15.0" fill="rgb(253,220,52)" rx="2" ry="2" />
+<text  x="564.07" y="191.5" >SimpleElement&lt;IPMir..</text>
+</g>
+<g >
+<title>Packet::all_anno (125,394,935 samples, 0.14%)</title><rect x="893.3" y="213" width="1.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="896.25" y="223.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (1,275,036,760 samples, 1.41%)</title><rect x="333.1" y="437" width="16.7" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="336.14" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (13,508,580 samples, 0.01%)</title><rect x="611.7" y="117" width="0.2" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="614.74" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::push (1,505,511,800 samples, 1.67%)</title><rect x="615.9" y="101" width="19.6" height="15.0" fill="rgb(244,180,43)" rx="2" ry="2" />
+<text  x="618.85" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (108,059,996 samples, 0.12%)</title><rect x="906.3" y="245" width="1.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="909.27" y="255.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::compare_swap (85,988,363 samples, 0.10%)</title><rect x="365.1" y="485" width="1.1" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="368.11" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::length (25,099,510 samples, 0.03%)</title><rect x="963.1" y="405" width="0.4" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="966.14" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::length (168,862,058 samples, 0.19%)</title><rect x="783.7" y="197" width="2.2" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="786.72" y="207.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (70,385,743 samples, 0.08%)</title><rect x="999.7" y="405" width="0.9" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="1002.68" y="415.5" ></text>
+</g>
+<g >
+<title>ksys_write (19,272,105 samples, 0.02%)</title><rect x="1186.6" y="309" width="0.2" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="1189.59" y="319.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (25,047,686 samples, 0.03%)</title><rect x="706.8" y="133" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="709.82" y="143.5" ></text>
+</g>
+<g >
+<title>EtherMirror::simple_action (14,480,114 samples, 0.02%)</title><rect x="917.6" y="341" width="0.2" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="920.58" y="351.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::release (141,023,131 samples, 0.16%)</title><rect x="362.6" y="485" width="1.8" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="365.56" y="495.5" ></text>
+</g>
+<g >
+<title>x64_sys_call (8,061,855 samples, 0.01%)</title><rect x="146.9" y="437" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="149.86" y="447.5" ></text>
+</g>
+<g >
+<title>memcpy@plt (20,266,893 samples, 0.02%)</title><rect x="939.1" y="325" width="0.3" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="942.12" y="335.5" ></text>
+</g>
+<g >
+<title>Packet::make (31,811,674 samples, 0.04%)</title><rect x="1129.1" y="469" width="0.4" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="1132.11" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::network_header (25,102,022 samples, 0.03%)</title><rect x="736.9" y="181" width="0.4" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="739.92" y="191.5" ></text>
+</g>
+<g >
+<title>IPAddress::addr (24,126,854 samples, 0.03%)</title><rect x="781.3" y="197" width="0.3" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="784.30" y="207.5" ></text>
+</g>
+<g >
+<title>per_thread&lt;QueueDevice::ThreadState&gt;::operator (11,578,370 samples, 0.01%)</title><rect x="578.8" y="69" width="0.2" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="581.80" y="79.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header_offset (51,140,270 samples, 0.06%)</title><rect x="707.9" y="149" width="0.7" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="710.89" y="159.5" ></text>
+</g>
+<g >
+<title>flow_dv_apply (9,247,948 samples, 0.01%)</title><rect x="146.9" y="549" width="0.1" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="149.86" y="559.5" ></text>
+</g>
+<g >
+<title>Vector&lt;IPAddress, 16ul&gt;::begin (21,231,146 samples, 0.02%)</title><rect x="835.8" y="197" width="0.3" height="15.0" fill="rgb(251,213,50)" rx="2" ry="2" />
+<text  x="838.82" y="207.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::attempt (1,576,567,464 samples, 1.75%)</title><rect x="329.2" y="469" width="20.6" height="15.0" fill="rgb(223,83,20)" rx="2" ry="2" />
+<text  x="332.19" y="479.5" ></text>
+</g>
+<g >
+<title>[irqbalance] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="453" width="0.1" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="1188.62" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (18,340,628 samples, 0.02%)</title><rect x="1001.6" y="437" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1004.59" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (14,481,409 samples, 0.02%)</title><rect x="745.6" y="197" width="0.2" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="748.58" y="207.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_tail (36,672,162 samples, 0.04%)</title><rect x="966.5" y="405" width="0.5" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="969.52" y="415.5" ></text>
+</g>
+<g >
+<title>x64_sys_call (8,243,706 samples, 0.01%)</title><rect x="147.1" y="517" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="150.08" y="527.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (105,033,500 samples, 0.12%)</title><rect x="577.0" y="69" width="1.3" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="579.97" y="79.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::operator= (362,397,440 samples, 0.40%)</title><rect x="351.0" y="453" width="4.7" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="354.00" y="463.5" ></text>
+</g>
+<g >
+<title>FromDPDKDevice::run_task (52,431,177,939 samples, 58.06%)</title><rect x="444.0" y="469" width="685.1" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="446.95" y="479.5" >FromDPDKDevice::run_task</text>
+</g>
+<g >
+<title>rte_pktmbuf_tailroom (36,671,685 samples, 0.04%)</title><rect x="834.4" y="165" width="0.5" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="837.40" y="175.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::count (12,551,436 samples, 0.01%)</title><rect x="708.9" y="149" width="0.2" height="15.0" fill="rgb(221,75,17)" rx="2" ry="2" />
+<text  x="711.95" y="159.5" ></text>
+</g>
+<g >
+<title>[libglib-2.0.so.0.8000.0] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="485" width="0.1" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="1188.62" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::length (22,197,648 samples, 0.02%)</title><rect x="903.2" y="277" width="0.3" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="906.18" y="287.5" ></text>
+</g>
+<g >
+<title>Task::fast_reschedule (188,023,169 samples, 0.21%)</title><rect x="1026.7" y="453" width="2.5" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="1029.70" y="463.5" ></text>
+</g>
+<g >
+<title>mlx5_rx_burst_vec (408,738,755 samples, 0.45%)</title><rect x="1030.5" y="453" width="5.3" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="1033.48" y="463.5" ></text>
+</g>
+<g >
+<title>EtherMirror::simple_action_batch (1,654,570,477 samples, 1.83%)</title><rect x="917.8" y="341" width="21.6" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="920.77" y="351.5" >E..</text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (18,337,297 samples, 0.02%)</title><rect x="1001.8" y="437" width="0.3" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="1004.83" y="447.5" ></text>
+</g>
+<g >
+<title>SimpleElement&lt;CheckIPHeader&gt;::push_batch (25,796,038,671 samples, 28.57%)</title><rect x="559.3" y="261" width="337.1" height="15.0" fill="rgb(238,152,36)" rx="2" ry="2" />
+<text  x="562.25" y="271.5" >SimpleElement&lt;CheckIPHeader&gt;::push_batch</text>
+</g>
+<g >
+<title>Packet::all_anno (53,978,200 samples, 0.06%)</title><rect x="964.1" y="389" width="0.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="967.12" y="399.5" ></text>
+</g>
+<g >
+<title>dlopen_doit (72,780,822 samples, 0.08%)</title><rect x="147.5" y="485" width="0.9" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="150.47" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::uniqueify (20,271,001 samples, 0.02%)</title><rect x="937.4" y="325" width="0.2" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="940.36" y="335.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (24,123,054 samples, 0.03%)</title><rect x="612.2" y="117" width="0.3" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="615.16" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (21,239,813 samples, 0.02%)</title><rect x="742.6" y="133" width="0.3" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="745.58" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::end_buffer (28,926,219 samples, 0.03%)</title><rect x="971.5" y="453" width="0.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="974.50" y="463.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::release (454,114,923 samples, 0.50%)</title><rect x="349.8" y="469" width="5.9" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="352.80" y="479.5" ></text>
+</g>
+<g >
+<title>IPAddress* find&lt;IPAddress&gt; (64,622,429 samples, 0.07%)</title><rect x="778.2" y="197" width="0.8" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="781.20" y="207.5" ></text>
+</g>
+<g >
+<title>x64_sys_call (8,345,787 samples, 0.01%)</title><rect x="147.6" y="309" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="150.58" y="319.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (14,479,173 samples, 0.02%)</title><rect x="746.6" y="181" width="0.2" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="749.62" y="191.5" ></text>
+</g>
+<g >
+<title>main (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="533" width="0.4" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="1189.47" y="543.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_tailroom (326,047,124 samples, 0.36%)</title><rect x="996.3" y="421" width="4.3" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="999.34" y="431.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thisthread_begin (1,280,074,050 samples, 1.42%)</title><rect x="1008.5" y="453" width="16.7" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1011.51" y="463.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (25,855,831,231 samples, 28.63%)</title><rect x="558.8" y="293" width="337.8" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="561.76" y="303.5" >BatchElement::output_push_batch</text>
+</g>
+<g >
+<title>__GI___ioctl (8,453,475 samples, 0.01%)</title><rect x="146.9" y="485" width="0.1" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="149.86" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (170,783,262 samples, 0.19%)</title><rect x="692.6" y="85" width="2.2" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="695.59" y="95.5" ></text>
+</g>
+<g >
+<title>TimerSet::timer_stride (728,738,316 samples, 0.81%)</title><rect x="1162.3" y="501" width="9.6" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="1165.34" y="511.5" ></text>
+</g>
+<g >
+<title>__GI___libc_write (19,843,047 samples, 0.02%)</title><rect x="1186.6" y="389" width="0.2" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="1189.59" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::mb (44,393,308 samples, 0.05%)</title><rect x="783.1" y="181" width="0.6" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="786.14" y="191.5" ></text>
+</g>
+<g >
+<title>Packet::length (226,529,901 samples, 0.25%)</title><rect x="991.2" y="405" width="3.0" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="994.23" y="415.5" ></text>
+</g>
+<g >
+<title>DecIPTTL::simple_action_batch (2,726,324,262 samples, 3.02%)</title><rect x="713.1" y="213" width="35.6" height="15.0" fill="rgb(250,208,49)" rx="2" ry="2" />
+<text  x="716.12" y="223.5" >Dec..</text>
+</g>
+<g >
+<title>irqbalance (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="597" width="0.1" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="1188.62" y="607.5" ></text>
+</g>
+<g >
+<title>click_current_cpu_id (79,246,570 samples, 0.09%)</title><rect x="1022.9" y="437" width="1.0" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="1025.87" y="447.5" ></text>
+</g>
+<g >
+<title>Element::port (7,724,350 samples, 0.01%)</title><rect x="749.1" y="229" width="0.1" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="752.06" y="239.5" ></text>
+</g>
+<g >
+<title>__x64_sys_ioctl (7,966,460 samples, 0.01%)</title><rect x="146.9" y="421" width="0.1" height="15.0" fill="rgb(249,204,49)" rx="2" ry="2" />
+<text  x="149.87" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::next (49,167,507 samples, 0.05%)</title><rect x="637.5" y="165" width="0.6" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="640.51" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::headroom (383,001,542 samples, 0.42%)</title><rect x="619.4" y="85" width="5.0" height="15.0" fill="rgb(216,54,12)" rx="2" ry="2" />
+<text  x="622.44" y="95.5" ></text>
+</g>
+<g >
+<title>IPMirror::simple_action (4,547,840,567 samples, 5.04%)</title><rect x="644.1" y="149" width="59.5" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="647.15" y="159.5" >IPMirr..</text>
+</g>
+<g >
+<title>Packet::all_anno (128,319,345 samples, 0.14%)</title><rect x="735.0" y="149" width="1.7" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="737.98" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::pull (696,351,397 samples, 0.77%)</title><rect x="908.1" y="277" width="9.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="911.05" y="287.5" ></text>
+</g>
+<g >
+<title>Element::noutputs (27,982,471 samples, 0.03%)</title><rect x="967.6" y="421" width="0.4" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="970.59" y="431.5" ></text>
+</g>
+<g >
+<title>Element::port (12,461,157 samples, 0.01%)</title><rect x="712.3" y="181" width="0.2" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="715.31" y="191.5" ></text>
+</g>
+<g >
+<title>Packet::length (131,189,189 samples, 0.15%)</title><rect x="957.3" y="389" width="1.7" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="960.32" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::mb (52,087,327 samples, 0.06%)</title><rect x="979.8" y="405" width="0.6" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="982.77" y="415.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::release (23,211,352 samples, 0.03%)</title><rect x="1161.5" y="485" width="0.3" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="1164.47" y="495.5" ></text>
+</g>
+<g >
+<title>strcmp (10,281,535 samples, 0.01%)</title><rect x="148.1" y="341" width="0.1" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="151.10" y="351.5" ></text>
+</g>
+<g >
+<title>mmap64 (8,345,787 samples, 0.01%)</title><rect x="147.6" y="357" width="0.1" height="15.0" fill="rgb(220,70,16)" rx="2" ry="2" />
+<text  x="150.58" y="367.5" ></text>
+</g>
+<g >
+<title>Element::port (27,021,212 samples, 0.03%)</title><rect x="636.5" y="149" width="0.4" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="639.51" y="159.5" ></text>
+</g>
+<g >
+<title>WritablePacket::ip_header (80,049,862 samples, 0.09%)</title><rect x="709.8" y="149" width="1.0" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="712.80" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::mb (92,529,691 samples, 0.10%)</title><rect x="819.6" y="117" width="1.2" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="822.58" y="127.5" ></text>
+</g>
+<g >
+<title>RouterThread::stop_flag (159,975,663 samples, 0.18%)</title><rect x="299.9" y="469" width="2.1" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="302.93" y="479.5" ></text>
+</g>
+<g >
+<title>BatchElement::push_batch (14,439,800,677 samples, 15.99%)</title><rect x="560.4" y="229" width="188.6" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="563.35" y="239.5" >BatchElement::push_batch</text>
+</g>
+<g >
+<title>__x64_sys_write (19,272,105 samples, 0.02%)</title><rect x="1186.6" y="325" width="0.2" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="1189.59" y="335.5" ></text>
+</g>
+<g >
+<title>Packet::next (47,255,896 samples, 0.05%)</title><rect x="562.7" y="101" width="0.6" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="565.67" y="111.5" ></text>
+</g>
+<g >
+<title>SimpleElement&lt;IPMirror&gt;::_sm_action_batch (5,665,616,108 samples, 6.27%)</title><rect x="638.2" y="165" width="74.1" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="641.24" y="175.5" >SimpleEl..</text>
+</g>
+<g >
+<title>Packet::length (29,913,614 samples, 0.03%)</title><rect x="887.1" y="213" width="0.4" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="890.06" y="223.5" ></text>
+</g>
+<g >
+<title>QueueDevice::id_for_thread (36,606,927 samples, 0.04%)</title><rect x="579.3" y="69" width="0.5" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="582.34" y="79.5" ></text>
+</g>
+<g >
+<title>dl_open_worker_begin (70,147,796 samples, 0.08%)</title><rect x="147.5" y="405" width="0.9" height="15.0" fill="rgb(233,129,31)" rx="2" ry="2" />
+<text  x="150.49" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (94,553,636 samples, 0.10%)</title><rect x="693.6" y="69" width="1.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="696.59" y="79.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_tasks (187,446,391 samples, 0.21%)</title><rect x="1176.2" y="517" width="2.5" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="1179.24" y="527.5" ></text>
+</g>
+<g >
+<title>click (89,954,231,563 samples, 99.62%)</title><rect x="10.0" y="597" width="1175.5" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="13.02" y="607.5" >click</text>
+</g>
+<g >
+<title>Packet::uniqueify (29,874,526 samples, 0.03%)</title><rect x="708.6" y="149" width="0.3" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="711.56" y="159.5" ></text>
+</g>
+<g >
+<title>[libmlx5.so.1.24.52.0] (8,537,389 samples, 0.01%)</title><rect x="146.9" y="517" width="0.1" height="15.0" fill="rgb(249,206,49)" rx="2" ry="2" />
+<text  x="149.86" y="527.5" ></text>
+</g>
+<g >
+<title>Packet::next (286,527,369 samples, 0.32%)</title><rect x="904.3" y="277" width="3.8" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="907.31" y="287.5" ></text>
+</g>
+<g >
+<title>Packet::buffer (44,378,947 samples, 0.05%)</title><rect x="791.5" y="181" width="0.5" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="794.46" y="191.5" ></text>
+</g>
+<g >
+<title>Packet::set_mac_header (2,284,014,787 samples, 2.53%)</title><rect x="972.5" y="453" width="29.9" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="975.55" y="463.5" >Pa..</text>
+</g>
+<g >
+<title>Packet::all_anno (39,515,320 samples, 0.04%)</title><rect x="728.5" y="181" width="0.5" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="731.48" y="191.5" ></text>
+</g>
+<g >
+<title>clear_page_erms (181,226,052 samples, 0.20%)</title><rect x="1182.8" y="341" width="2.4" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="1185.84" y="351.5" ></text>
+</g>
+<g >
+<title>_start (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="581" width="0.4" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="1189.47" y="591.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (62,731,757 samples, 0.07%)</title><rect x="703.6" y="149" width="0.8" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="706.58" y="159.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (17,375,981 samples, 0.02%)</title><rect x="1007.8" y="437" width="0.2" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="1010.80" y="447.5" ></text>
+</g>
+<g >
+<title>BatchElement::output_push_batch (29,359,471,190 samples, 32.51%)</title><rect x="556.6" y="389" width="383.7" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="559.60" y="399.5" >BatchElement::output_push_batch</text>
+</g>
+<g >
+<title>__mmap (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="549" width="2.5" height="15.0" fill="rgb(227,104,25)" rx="2" ry="2" />
+<text  x="1185.69" y="559.5" ></text>
+</g>
+<g >
+<title>do_idle (190,286,888 samples, 0.21%)</title><rect x="1186.9" y="533" width="2.5" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1189.93" y="543.5" ></text>
+</g>
+<g >
+<title>Element::port (11,575,284 samples, 0.01%)</title><rect x="597.5" y="101" width="0.2" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="600.53" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::set_anno_u16 (13,514,807 samples, 0.01%)</title><rect x="966.3" y="389" width="0.1" height="15.0" fill="rgb(230,115,27)" rx="2" ry="2" />
+<text  x="969.27" y="399.5" ></text>
+</g>
+<g >
+<title>Master::paused (819,827,634 samples, 0.91%)</title><rect x="310.5" y="453" width="10.8" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="313.54" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::set_network_header (45,352,950 samples, 0.05%)</title><rect x="834.9" y="197" width="0.6" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="837.88" y="207.5" ></text>
+</g>
+<g >
+<title>_dl_sysdep_start (11,081,087 samples, 0.01%)</title><rect x="149.8" y="549" width="0.1" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="152.77" y="559.5" ></text>
+</g>
+<g >
+<title>execute_ioctl (8,537,389 samples, 0.01%)</title><rect x="146.9" y="501" width="0.1" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="149.86" y="511.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (8,243,706 samples, 0.01%)</title><rect x="147.1" y="549" width="0.1" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="150.08" y="559.5" ></text>
+</g>
+<g >
+<title>Packet::length (24,123,203 samples, 0.03%)</title><rect x="995.0" y="421" width="0.3" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="997.99" y="431.5" ></text>
+</g>
+<g >
+<title>arch_call_rest_init (37,917,886 samples, 0.04%)</title><rect x="1189.4" y="517" width="0.5" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="1192.42" y="527.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::make_tail (54,059,742 samples, 0.06%)</title><rect x="1007.4" y="453" width="0.8" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="1010.45" y="463.5" ></text>
+</g>
+<g >
+<title>Element::output (9,654,652 samples, 0.01%)</title><rect x="969.3" y="437" width="0.1" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="972.28" y="447.5" ></text>
+</g>
+<g >
+<title>SimpleSpinlock::attempt (54,096,109 samples, 0.06%)</title><rect x="361.9" y="485" width="0.7" height="15.0" fill="rgb(223,83,20)" rx="2" ry="2" />
+<text  x="364.85" y="495.5" ></text>
+</g>
+<g >
+<title>[irqbalance] (7,768,945 samples, 0.01%)</title><rect x="1185.6" y="437" width="0.1" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="1188.62" y="447.5" ></text>
+</g>
+<g >
+<title>per_thread&lt;QueueDevice::ThreadState&gt;::get_value_for_thread (101,997,062 samples, 0.11%)</title><rect x="1023.9" y="437" width="1.3" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1026.90" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::buffer (655,042,215 samples, 0.73%)</title><rect x="801.8" y="165" width="8.6" height="15.0" fill="rgb(242,173,41)" rx="2" ry="2" />
+<text  x="804.83" y="175.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (17,407,375 samples, 0.02%)</title><rect x="1159.5" y="453" width="0.3" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="1162.52" y="463.5" ></text>
+</g>
+<g >
+<title>user_path_at_empty (8,243,706 samples, 0.01%)</title><rect x="147.1" y="469" width="0.1" height="15.0" fill="rgb(226,99,23)" rx="2" ry="2" />
+<text  x="150.08" y="479.5" ></text>
+</g>
+<g >
+<title>RouterThread::task_begin (97,661,385 samples, 0.11%)</title><rect x="1147.1" y="501" width="1.3" height="15.0" fill="rgb(233,133,31)" rx="2" ry="2" />
+<text  x="1150.08" y="511.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (364,326,187 samples, 0.40%)</title><rect x="247.3" y="453" width="4.7" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="250.27" y="463.5" ></text>
+</g>
+<g >
+<title>Packet::set_prev (8,685,295 samples, 0.01%)</title><rect x="612.5" y="101" width="0.1" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="615.53" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::next (13,514,680 samples, 0.01%)</title><rect x="748.8" y="213" width="0.2" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="751.81" y="223.5" ></text>
+</g>
+<g >
+<title>__GI___access (9,050,142 samples, 0.01%)</title><rect x="147.1" y="565" width="0.1" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="150.08" y="575.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (28,903,622 samples, 0.03%)</title><rect x="578.3" y="69" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="581.35" y="79.5" ></text>
+</g>
+<g >
+<title>rest_init (37,917,886 samples, 0.04%)</title><rect x="1189.4" y="501" width="0.5" height="15.0" fill="rgb(252,217,51)" rx="2" ry="2" />
+<text  x="1192.42" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::mb (64,654,368 samples, 0.07%)</title><rect x="933.4" y="277" width="0.9" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="936.44" y="287.5" ></text>
+</g>
+<g >
+<title>Packet::next (127,253,087 samples, 0.14%)</title><rect x="963.5" y="405" width="1.6" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="966.47" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::mb (60,718,838 samples, 0.07%)</title><rect x="682.5" y="117" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="685.54" y="127.5" ></text>
+</g>
+<g >
+<title>__cmd_record.constprop.0 (29,097,173 samples, 0.03%)</title><rect x="1186.5" y="485" width="0.4" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="1189.47" y="495.5" ></text>
+</g>
+<g >
+<title>QueueDevice::id_for_thread (13,509,753 samples, 0.01%)</title><rect x="579.0" y="85" width="0.1" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="581.95" y="95.5" ></text>
+</g>
+<g >
+<title>Packet::next (189,895,047 samples, 0.21%)</title><rect x="704.7" y="149" width="2.4" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="707.66" y="159.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (27,972,935 samples, 0.03%)</title><rect x="907.7" y="261" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="910.68" y="271.5" ></text>
+</g>
+<g >
+<title>Packet::set_next (12,546,875 samples, 0.01%)</title><rect x="965.2" y="405" width="0.1" height="15.0" fill="rgb(242,171,41)" rx="2" ry="2" />
+<text  x="968.16" y="415.5" ></text>
+</g>
+<g >
+<title>strcmp (15,678,584 samples, 0.02%)</title><rect x="147.9" y="325" width="0.2" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="150.88" y="335.5" ></text>
+</g>
+<g >
+<title>Packet::mb (67,570,067 samples, 0.07%)</title><rect x="995.3" y="421" width="0.9" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="998.31" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::end_buffer (1,237,733,649 samples, 1.37%)</title><rect x="984.4" y="437" width="16.2" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="987.43" y="447.5" ></text>
+</g>
+<g >
+<title>perf_mmap__push (21,135,803 samples, 0.02%)</title><rect x="1186.6" y="453" width="0.2" height="15.0" fill="rgb(248,201,48)" rx="2" ry="2" />
+<text  x="1189.57" y="463.5" ></text>
+</g>
+<g >
+<title>Classifier::push_batch (31,814,183,243 samples, 35.23%)</title><rect x="551.9" y="421" width="415.7" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="554.85" y="431.5" >Classifier::push_batch</text>
+</g>
+<g >
+<title>IPAddress::IPAddress (49,142,436 samples, 0.05%)</title><rect x="886.0" y="213" width="0.6" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="888.97" y="223.5" ></text>
+</g>
+<g >
+<title>[libglib-2.0.so.0.8000.0] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="469" width="0.1" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="1188.62" y="479.5" ></text>
+</g>
+<g >
+<title>generic_perform_write (18,516,040 samples, 0.02%)</title><rect x="1186.6" y="245" width="0.2" height="15.0" fill="rgb(236,146,35)" rx="2" ry="2" />
+<text  x="1189.60" y="255.5" ></text>
+</g>
+<g >
+<title>Packet::anno_u16 (11,581,937 samples, 0.01%)</title><rect x="895.7" y="213" width="0.1" height="15.0" fill="rgb(238,154,36)" rx="2" ry="2" />
+<text  x="898.66" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (31,847,024 samples, 0.04%)</title><rect x="936.9" y="309" width="0.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="939.94" y="319.5" ></text>
+</g>
+<g >
+<title>_dl_catch_exception (71,820,161 samples, 0.08%)</title><rect x="147.5" y="421" width="0.9" height="15.0" fill="rgb(253,223,53)" rx="2" ry="2" />
+<text  x="150.47" y="431.5" ></text>
+</g>
+<g >
+<title>intel_idle (15,274,177 samples, 0.02%)</title><rect x="1189.5" y="389" width="0.2" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="1192.50" y="399.5" ></text>
+</g>
+<g >
+<title>cpu_startup_entry (37,837,748 samples, 0.04%)</title><rect x="1189.4" y="485" width="0.5" height="15.0" fill="rgb(252,220,52)" rx="2" ry="2" />
+<text  x="1192.42" y="495.5" ></text>
+</g>
+<g >
+<title>QueueDevice::add_count (17,368,101 samples, 0.02%)</title><rect x="578.7" y="85" width="0.3" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="581.72" y="95.5" ></text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="565" width="0.1" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="1188.62" y="575.5" ></text>
+</g>
+<g >
+<title>DPDKDevice::get_mbuf (20,197,682 samples, 0.02%)</title><rect x="562.4" y="101" width="0.3" height="15.0" fill="rgb(227,102,24)" rx="2" ry="2" />
+<text  x="565.41" y="111.5" ></text>
+</g>
+<g >
+<title>WritablePacket::ip_header (603,854,739 samples, 0.67%)</title><rect x="687.5" y="133" width="7.9" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="690.55" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::anno_u16 (17,376,178 samples, 0.02%)</title><rect x="965.6" y="389" width="0.2" height="15.0" fill="rgb(238,154,36)" rx="2" ry="2" />
+<text  x="968.55" y="399.5" ></text>
+</g>
+<g >
+<title>Element::output (27,021,212 samples, 0.03%)</title><rect x="636.5" y="165" width="0.4" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="639.51" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::data (405,995,719 samples, 0.45%)</title><rect x="815.5" y="133" width="5.3" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="818.48" y="143.5" ></text>
+</g>
+<g >
+<title>RouterThread::active (53,866,239 samples, 0.06%)</title><rect x="219.7" y="485" width="0.7" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="222.72" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (142,795,454 samples, 0.16%)</title><rect x="800.0" y="149" width="1.8" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="802.96" y="159.5" ></text>
+</g>
+<g >
+<title>_dl_map_object_deps (42,787,474 samples, 0.05%)</title><rect x="147.7" y="389" width="0.6" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="150.70" y="399.5" ></text>
+</g>
+<g >
+<title>do_idle (37,558,752 samples, 0.04%)</title><rect x="1189.4" y="469" width="0.5" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1192.43" y="479.5" ></text>
+</g>
+<g >
+<title>RouterThread::select_set (47,252,636 samples, 0.05%)</title><rect x="1144.7" y="501" width="0.6" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="1147.73" y="511.5" ></text>
+</g>
+<g >
+<title>vm_mmap_pgoff (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="453" width="2.5" height="15.0" fill="rgb(237,150,35)" rx="2" ry="2" />
+<text  x="1185.69" y="463.5" ></text>
+</g>
+<g >
+<title>openaux (40,125,685 samples, 0.04%)</title><rect x="147.7" y="357" width="0.5" height="15.0" fill="rgb(252,217,52)" rx="2" ry="2" />
+<text  x="150.71" y="367.5" ></text>
+</g>
+<g >
+<title>dl_open_worker (71,820,161 samples, 0.08%)</title><rect x="147.5" y="437" width="0.9" height="15.0" fill="rgb(236,145,34)" rx="2" ry="2" />
+<text  x="150.47" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::next (196,655,750 samples, 0.22%)</title><rect x="576.2" y="85" width="2.5" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="579.15" y="95.5" ></text>
+</g>
+<g >
+<title>QueueDevice::queue_for_thisthread_begin (107,344,171 samples, 0.12%)</title><rect x="1130.9" y="469" width="1.4" height="15.0" fill="rgb(235,140,33)" rx="2" ry="2" />
+<text  x="1133.91" y="479.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (8,685,450 samples, 0.01%)</title><rect x="940.3" y="389" width="0.1" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="943.26" y="399.5" ></text>
+</g>
+<g >
+<title>rte_pktmbuf_headroom (23,159,669 samples, 0.03%)</title><rect x="834.1" y="165" width="0.3" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="837.10" y="175.5" ></text>
+</g>
+<g >
+<title>BatchElement::push_batch (27,459,070,825 samples, 30.41%)</title><rect x="558.3" y="309" width="358.9" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="561.33" y="319.5" >BatchElement::push_batch</text>
+</g>
+<g >
+<title>ion (20,057,814 samples, 0.02%)</title><rect x="1186.6" y="405" width="0.2" height="15.0" fill="rgb(207,12,2)" rx="2" ry="2" />
+<text  x="1189.59" y="415.5" ></text>
+</g>
+<g >
+<title>[irqbalance] (8,199,086 samples, 0.01%)</title><rect x="1185.6" y="581" width="0.1" height="15.0" fill="rgb(243,178,42)" rx="2" ry="2" />
+<text  x="1188.62" y="591.5" ></text>
+</g>
+<g >
+<title>PacketBatchLinkedList::set_count (16,411,426 samples, 0.02%)</title><rect x="895.9" y="229" width="0.2" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="898.91" y="239.5" ></text>
+</g>
+<g >
+<title>Packet::network_header (350,229,990 samples, 0.39%)</title><rect x="690.5" y="101" width="4.6" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="693.51" y="111.5" ></text>
+</g>
+<g >
+<title>Packet::ip_header (44,398,222 samples, 0.05%)</title><rect x="666.7" y="133" width="0.6" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="669.69" y="143.5" ></text>
+</g>
+<g >
+<title>Packet::data (33,773,328 samples, 0.04%)</title><rect x="962.7" y="405" width="0.4" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="965.70" y="415.5" ></text>
+</g>
+<g >
+<title>Packet::next (138,011,562 samples, 0.15%)</title><rect x="935.6" y="325" width="1.8" height="15.0" fill="rgb(250,210,50)" rx="2" ry="2" />
+<text  x="938.56" y="335.5" ></text>
+</g>
+<g >
+<title>Unstrip::simple_action_batch (2,901,173,347 samples, 3.21%)</title><rect x="598.6" y="133" width="37.9" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="601.57" y="143.5" >Uns..</text>
+</g>
+<g >
+<title>_dl_relocate_object (8,457,008 samples, 0.01%)</title><rect x="148.3" y="389" width="0.1" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="151.26" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::xanno (69,476,603 samples, 0.08%)</title><rect x="894.0" y="197" width="0.9" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="896.98" y="207.5" ></text>
+</g>
+<g >
+<title>Master::paused (53,187,454 samples, 0.06%)</title><rect x="219.0" y="485" width="0.7" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="222.02" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::mb (111,881,738 samples, 0.12%)</title><rect x="681.1" y="101" width="1.4" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="684.08" y="111.5" ></text>
+</g>
+<g >
+<title>__x64_sys_access (8,243,706 samples, 0.01%)</title><rect x="147.1" y="501" width="0.1" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="150.08" y="511.5" ></text>
+</g>
+<g >
+<title>Packet::mb (65,613,524 samples, 0.07%)</title><rect x="574.3" y="69" width="0.8" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="577.28" y="79.5" ></text>
+</g>
+<g >
+<title>CheckIPHeader::simple_action (46,319,957 samples, 0.05%)</title><rect x="559.5" y="245" width="0.6" height="15.0" fill="rgb(224,91,21)" rx="2" ry="2" />
+<text  x="562.52" y="255.5" ></text>
+</g>
+<g >
+<title>Packet::mb (69,479,874 samples, 0.08%)</title><rect x="959.0" y="389" width="0.9" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="962.03" y="399.5" ></text>
+</g>
+<g >
+<title>Packet::mb (85,860,931 samples, 0.10%)</title><rect x="822.9" y="117" width="1.2" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="825.95" y="127.5" ></text>
+</g>
+<g >
+<title>BatchElement::push_batch (5,730,563,571 samples, 6.35%)</title><rect x="561.6" y="149" width="74.9" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="564.60" y="159.5" >BatchEle..</text>
+</g>
+<g >
+<title>worker_thread (19,704,636 samples, 0.02%)</title><rect x="1185.9" y="533" width="0.3" height="15.0" fill="rgb(214,45,10)" rx="2" ry="2" />
+<text  x="1188.94" y="543.5" ></text>
+</g>
+<g >
+<title>TimerSet::timer_stride (102,574,037 samples, 0.11%)</title><rect x="1180.0" y="517" width="1.4" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="1183.02" y="527.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (111,814,280 samples, 0.12%)</title><rect x="292.7" y="437" width="1.5" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="295.75" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (63,688,383 samples, 0.07%)</title><rect x="606.4" y="117" width="0.9" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="609.45" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::length (250,886,866 samples, 0.28%)</title><rect x="820.8" y="133" width="3.3" height="15.0" fill="rgb(241,165,39)" rx="2" ry="2" />
+<text  x="823.79" y="143.5" ></text>
+</g>
+<g >
+<title>RouterThread::thread_id (113,914,790 samples, 0.13%)</title><rect x="426.4" y="485" width="1.5" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="429.38" y="495.5" ></text>
+</g>
+<g >
+<title>cpuidle_enter_state (20,969,792 samples, 0.02%)</title><rect x="1189.4" y="405" width="0.3" height="15.0" fill="rgb(221,73,17)" rx="2" ry="2" />
+<text  x="1192.44" y="415.5" ></text>
+</g>
+<g >
+<title>__irq_exit_rcu (7,757,194 samples, 0.01%)</title><rect x="1187.1" y="405" width="0.1" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="1190.11" y="415.5" ></text>
+</g>
+<g >
+<title>__filemap_get_folio (9,378,466 samples, 0.01%)</title><rect x="1186.6" y="213" width="0.1" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="1189.61" y="223.5" ></text>
+</g>
+<g >
+<title>Packet::ip_header (477,541,915 samples, 0.53%)</title><rect x="688.8" y="117" width="6.3" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="691.85" y="127.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (183,307,097 samples, 0.20%)</title><rect x="700.9" y="85" width="2.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="703.94" y="95.5" ></text>
+</g>
+<g >
+<title>Element::Port::push_batch (31,998,305,831 samples, 35.44%)</title><rect x="551.1" y="437" width="418.2" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="554.13" y="447.5" >Element::Port::push_batch</text>
+</g>
+<g >
+<title>call_cpuidle (21,210,751 samples, 0.02%)</title><rect x="1189.4" y="437" width="0.3" height="15.0" fill="rgb(245,184,44)" rx="2" ry="2" />
+<text  x="1192.43" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (115,788,461 samples, 0.13%)</title><rect x="741.1" y="133" width="1.5" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="744.07" y="143.5" ></text>
+</g>
+<g >
+<title>Element::noutputs (48,227,841 samples, 0.05%)</title><rect x="961.6" y="405" width="0.7" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="964.63" y="415.5" ></text>
+</g>
+<g >
+<title>Element::output (8,637,286 samples, 0.01%)</title><rect x="940.1" y="373" width="0.1" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="943.13" y="383.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (62,739,903 samples, 0.07%)</title><rect x="936.1" y="309" width="0.8" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="939.12" y="319.5" ></text>
+</g>
+<g >
+<title>ib_uverbs_cmd_verbs (7,868,248 samples, 0.01%)</title><rect x="146.9" y="389" width="0.1" height="15.0" fill="rgb(211,29,7)" rx="2" ry="2" />
+<text  x="149.87" y="399.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (91,782,787 samples, 0.10%)</title><rect x="1160.3" y="453" width="1.2" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="1163.27" y="463.5" ></text>
+</g>
+<g >
+<title>FromDPDKDevice::run_task (185,936,743 samples, 0.21%)</title><rect x="417.5" y="485" width="2.4" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="420.48" y="495.5" ></text>
+</g>
+<g >
+<title>populate_vma_page_range (192,949,619 samples, 0.21%)</title><rect x="1182.7" y="421" width="2.5" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="1185.69" y="431.5" ></text>
+</g>
+<g >
+<title>Packet::pull (26,961,095 samples, 0.03%)</title><rect x="897.5" y="293" width="0.3" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="900.49" y="303.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::value (49,254,232 samples, 0.05%)</title><rect x="252.0" y="469" width="0.7" height="15.0" fill="rgb(231,120,28)" rx="2" ry="2" />
+<text  x="255.03" y="479.5" ></text>
+</g>
+<g >
+<title>rte_prefetch0 (23,151,713 samples, 0.03%)</title><rect x="1135.6" y="469" width="0.3" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="1138.62" y="479.5" ></text>
+</g>
+<g >
+<title>Packet::set_network_header (3,228,430,211 samples, 3.58%)</title><rect x="792.7" y="181" width="42.2" height="15.0" fill="rgb(254,228,54)" rx="2" ry="2" />
+<text  x="795.69" y="191.5" >Pac..</text>
+</g>
+<g >
+<title>Packet::xanno (20,268,672 samples, 0.02%)</title><rect x="1007.2" y="437" width="0.2" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1010.18" y="447.5" ></text>
+</g>
+<g >
+<title>Packet::mb (76,241,851 samples, 0.08%)</title><rect x="824.1" y="133" width="1.0" height="15.0" fill="rgb(251,211,50)" rx="2" ry="2" />
+<text  x="827.07" y="143.5" ></text>
+</g>
+<g >
+<title>IPMirror::simple_action (49,225,744 samples, 0.05%)</title><rect x="636.9" y="165" width="0.6" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="639.86" y="175.5" ></text>
+</g>
+<g >
+<title>Packet::transport_header (30,885,647 samples, 0.03%)</title><rect x="674.5" y="133" width="0.4" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="677.47" y="143.5" ></text>
+</g>
+<g >
+<title>RouterThread::run_signals (153,728,680 samples, 0.17%)</title><rect x="367.6" y="501" width="2.0" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="370.56" y="511.5" ></text>
+</g>
+<g >
+<title>__x64_sys_mmap (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="485" width="2.5" height="15.0" fill="rgb(223,83,19)" rx="2" ry="2" />
+<text  x="1185.69" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::data (23,066,107 samples, 0.03%)</title><rect x="984.1" y="437" width="0.3" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="987.13" y="447.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (193,051,491 samples, 0.21%)</title><rect x="1182.7" y="517" width="2.5" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="1185.69" y="527.5" ></text>
+</g>
+<g >
+<title>CheckIPHeader::simple_action (10,503,589,037 samples, 11.63%)</title><rect x="754.3" y="229" width="137.2" height="15.0" fill="rgb(224,91,21)" rx="2" ry="2" />
+<text  x="757.25" y="239.5" >CheckIPHeader::si..</text>
+</g>
+<g >
+<title>Element::port (11,579,523 samples, 0.01%)</title><rect x="896.4" y="261" width="0.2" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="899.41" y="271.5" ></text>
+</g>
+<g >
+<title>Packet::all_anno (48,067,890 samples, 0.05%)</title><rect x="744.7" y="181" width="0.6" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="747.65" y="191.5" ></text>
+</g>
+<g >
+<title>Classification::Wordwise::Program::match (42,475,218 samples, 0.05%)</title><rect x="551.3" y="421" width="0.6" height="15.0" fill="rgb(237,150,35)" rx="2" ry="2" />
+<text  x="554.30" y="431.5" ></text>
+</g>
+<g >
+<title>Strip::simple_action_batch (1,478,798,978 samples, 1.64%)</title><rect x="897.8" y="293" width="19.4" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="900.84" y="303.5" ></text>
+</g>
+<g >
+<title>atomic_uint32_t::swap (9,671,361 samples, 0.01%)</title><rect x="1162.2" y="485" width="0.1" height="15.0" fill="rgb(214,42,10)" rx="2" ry="2" />
+<text  x="1165.21" y="495.5" ></text>
+</g>
+<g >
+<title>Packet::network_header (248,923,608 samples, 0.28%)</title><rect x="739.6" y="149" width="3.3" height="15.0" fill="rgb(213,36,8)" rx="2" ry="2" />
+<text  x="742.61" y="159.5" ></text>
+</g>
+</g>
+</svg>
