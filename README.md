@@ -71,3 +71,5 @@ python energy-scheduling/run-npf.py --pairs 8 --hours 4 --continue myniceexperim
 ```
 
 If it's the first time you run this experiment, it will create a `myinitexperiment` folder run npf and store cache. If this folder already exists, it will load the cache and restart the experiment where it was stopped. Default experiments ids are ugly timestamps. You can also provide `--continue auto` to automatically fetch the last experiment id and continue it.
+
+> You should launch the tests from your frontend, using `bash npf_script.bash`
